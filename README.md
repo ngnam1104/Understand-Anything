@@ -41,18 +41,66 @@ An open-source tool that combines LLM intelligence with static analysis to help 
 
 ## Quick Start
 
+### 1. Analyze any codebase (via Claude Code)
+
 ```bash
-# Install dependencies
+# Install the plugin
+claude --plugin-dir /path/to/Understand-Anything/packages/skill
+
+# In any project, run:
+/understand
+```
+
+This produces `.understand-anything/knowledge-graph.json` in your project.
+
+### 2. View the dashboard
+
+```bash
+# Clone this repo and install
+git clone https://github.com/Lum1104/Understand-Anything.git
+cd Understand-Anything
 pnpm install
 
-# Build the core package
-pnpm --filter @understand-anything/core build
-
-# Build the skill package
-pnpm --filter @understand-anything/skill build
-
-# Start the dashboard dev server
+# Start the dashboard (auto-detects .understand-anything/ from your project)
 pnpm dev:dashboard
+```
+
+The dashboard dev server automatically looks for `.understand-anything/knowledge-graph.json` in the project root — no manual copying needed.
+
+### 3. Use other skill commands
+
+```bash
+# Ask questions about the codebase
+/understand-chat How does authentication work in this project?
+
+# Analyze impact of current changes
+/understand-diff
+
+# Deep-dive into a specific file
+/understand-explain src/auth/login.ts
+
+# Generate an onboarding guide
+/understand-onboard
+```
+
+## Plugin Installation
+
+The skill commands work in any project via Claude Code:
+
+```bash
+# Option 1: Load for current session
+claude --plugin-dir /path/to/Understand-Anything/packages/skill
+
+# Option 2: Add to .claude/settings.json for persistent use
+# (in the project where you cloned Understand-Anything)
+```
+
+```json
+{
+  "enabledPlugins": {
+    "understand-anything": {}
+  }
+}
 ```
 
 ## Commands
@@ -67,45 +115,7 @@ pnpm dev:dashboard
 | `pnpm --filter @understand-anything/dashboard build` | Build the dashboard |
 | `pnpm dev:dashboard` | Start dashboard dev server |
 
-### Claude Code Skills
-
-Install as a Claude Code plugin, then use these commands:
-
-```bash
-# Analyze a codebase (produces .understand-anything/knowledge-graph.json)
-/understand
-
-# Force a full rebuild
-/understand --full
-
-# Ask questions about the codebase
-/understand-chat How does authentication work in this project?
-
-# Analyze impact of current changes
-/understand-diff
-
-# Deep-dive into a specific file
-/understand-explain src/auth/login.ts
-
-# Generate an onboarding guide
-/understand-onboard
-```
-
-#### Plugin Installation
-
-```bash
-# Option 1: Load for current session
-claude --plugin-dir ./packages/skill
-
-# Option 2: Add to .claude/settings.json for persistent use
-{
-  "enabledPlugins": {
-    "understand-anything": {}
-  }
-}
-```
-
-#### Multi-Agent Architecture
+## Multi-Agent Architecture
 
 The `/understand` command orchestrates 5 specialized agents in a 7-phase pipeline:
 
