@@ -32,6 +32,9 @@ export interface CustomNodeData extends Record<string, unknown> {
   searchScore?: number;
   isSelected: boolean;
   isTourHighlighted: boolean;
+  isDiffChanged: boolean;
+  isDiffAffected: boolean;
+  isDiffFaded: boolean;
   onNodeClick?: (nodeId: string) => void;
 }
 
@@ -59,6 +62,15 @@ export default function CustomNode({
     } else {
       extraClass = "ring-1 ring-gold-dim/60";
     }
+  }
+
+  // Diff overlay styling (composes with above)
+  if (data.isDiffChanged) {
+    extraClass += " ring-2 ring-[var(--color-diff-changed)] diff-changed-glow";
+  } else if (data.isDiffAffected) {
+    extraClass += " ring-1 ring-[var(--color-diff-affected)] diff-affected-glow";
+  } else if (data.isDiffFaded) {
+    extraClass += " diff-faded";
   }
 
   const name = data.label ?? "unnamed";

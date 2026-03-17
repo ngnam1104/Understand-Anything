@@ -38,6 +38,26 @@ export default defineConfig({
               }
             }
           }
+          if (req.url === "/diff-overlay.json") {
+            const graphDir = process.env.GRAPH_DIR;
+            const candidates = [
+              ...(graphDir
+                ? [path.resolve(graphDir, ".understand-anything/diff-overlay.json")]
+                : []),
+              path.resolve(process.cwd(), ".understand-anything/diff-overlay.json"),
+              path.resolve(process.cwd(), "../../../.understand-anything/diff-overlay.json"),
+            ];
+            for (const candidate of candidates) {
+              if (fs.existsSync(candidate)) {
+                res.setHeader("Content-Type", "application/json");
+                fs.createReadStream(candidate).pipe(res);
+                return;
+              }
+            }
+            res.statusCode = 404;
+            res.end();
+            return;
+          }
           next();
         });
       },

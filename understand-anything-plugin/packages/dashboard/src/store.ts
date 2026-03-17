@@ -28,6 +28,10 @@ interface DashboardStore {
 
   persona: Persona;
 
+  diffMode: boolean;
+  changedNodeIds: Set<string>;
+  affectedNodeIds: Set<string>;
+
   setGraph: (graph: KnowledgeGraph) => void;
   selectNode: (nodeId: string | null) => void;
   setSearchQuery: (query: string) => void;
@@ -35,6 +39,10 @@ interface DashboardStore {
   setPersona: (persona: Persona) => void;
   openCodeViewer: (nodeId: string) => void;
   closeCodeViewer: () => void;
+
+  setDiffOverlay: (changed: string[], affected: string[]) => void;
+  toggleDiffMode: () => void;
+  clearDiffOverlay: () => void;
 
   startTour: () => void;
   stopTour: () => void;
@@ -67,6 +75,10 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
 
   persona: "junior",
 
+  diffMode: false,
+  changedNodeIds: new Set<string>(),
+  affectedNodeIds: new Set<string>(),
+
   setGraph: (graph) => {
     const searchEngine = new SearchEngine(graph.nodes);
     const query = get().searchQuery;
@@ -95,6 +107,22 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
 
   openCodeViewer: (nodeId) => set({ codeViewerOpen: true, codeViewerNodeId: nodeId }),
   closeCodeViewer: () => set({ codeViewerOpen: false, codeViewerNodeId: null }),
+
+  setDiffOverlay: (changed, affected) =>
+    set({
+      diffMode: true,
+      changedNodeIds: new Set(changed),
+      affectedNodeIds: new Set(affected),
+    }),
+
+  toggleDiffMode: () => set((state) => ({ diffMode: !state.diffMode })),
+
+  clearDiffOverlay: () =>
+    set({
+      diffMode: false,
+      changedNodeIds: new Set<string>(),
+      affectedNodeIds: new Set<string>(),
+    }),
 
   startTour: () => {
     const { graph } = get();

@@ -6,6 +6,7 @@ import CodeViewer from "./components/CodeViewer";
 import SearchBar from "./components/SearchBar";
 import NodeInfo from "./components/NodeInfo";
 import LayerLegend from "./components/LayerLegend";
+import DiffToggle from "./components/DiffToggle";
 import LearnPanel from "./components/LearnPanel";
 import PersonaSelector from "./components/PersonaSelector";
 import ProjectOverview from "./components/ProjectOverview";
@@ -18,6 +19,7 @@ function App() {
   const persona = useDashboardStore((s) => s.persona);
   const codeViewerOpen = useDashboardStore((s) => s.codeViewerOpen);
   const closeCodeViewer = useDashboardStore((s) => s.closeCodeViewer);
+  const setDiffOverlay = useDashboardStore((s) => s.setDiffOverlay);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -38,6 +40,32 @@ function App() {
         setLoadError(`Failed to load knowledge graph: ${err instanceof Error ? err.message : String(err)}`);
       });
   }, [setGraph]);
+
+  useEffect(() => {
+    fetch("/diff-overlay.json")
+      .then((res) => {
+        if (!res.ok) return null;
+        return res.json();
+      })
+      .then((data: unknown) => {
+        if (
+          data &&
+          typeof data === "object" &&
+          "changedNodeIds" in data &&
+          "affectedNodeIds" in data &&
+          Array.isArray((data as Record<string, unknown>).changedNodeIds) &&
+          Array.isArray((data as Record<string, unknown>).affectedNodeIds)
+        ) {
+          const d = data as { changedNodeIds: string[]; affectedNodeIds: string[] };
+          if (d.changedNodeIds.length > 0) {
+            setDiffOverlay(d.changedNodeIds, d.affectedNodeIds);
+          }
+        }
+      })
+      .catch(() => {
+        // Silently ignore - diff overlay is optional
+      });
+  }, [setDiffOverlay]);
 
   // Determine sidebar content
   // Learn persona always shows LearnPanel; tour active overrides everything
@@ -61,6 +89,7 @@ function App() {
           <PersonaSelector />
         </div>
         <div className="flex items-center gap-4">
+          <DiffToggle />
           <LayerLegend />
         </div>
       </header>

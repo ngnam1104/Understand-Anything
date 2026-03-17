@@ -30,6 +30,9 @@ export default function GraphView() {
   const showLayers = useDashboardStore((s) => s.showLayers);
   const tourHighlightedNodeIds = useDashboardStore((s) => s.tourHighlightedNodeIds);
   const persona = useDashboardStore((s) => s.persona);
+  const diffMode = useDashboardStore((s) => s.diffMode);
+  const changedNodeIds = useDashboardStore((s) => s.changedNodeIds);
+  const affectedNodeIds = useDashboardStore((s) => s.affectedNodeIds);
 
   const handleNodeSelect = useCallback(
     (nodeId: string) => {
@@ -78,20 +81,41 @@ export default function GraphView() {
           searchScore: matchResult?.score,
           isSelected: selectedNodeId === node.id,
           isTourHighlighted: tourHighlightedNodeIds.includes(node.id),
+          isDiffChanged: diffMode && changedNodeIds.has(node.id),
+          isDiffAffected: diffMode && affectedNodeIds.has(node.id),
+          isDiffFaded: diffMode && !changedNodeIds.has(node.id) && !affectedNodeIds.has(node.id),
           onNodeClick: handleNodeSelect,
         },
       };
     });
 
-    const flowEdges: Edge[] = filteredGraphEdges.map((edge, i) => ({
-      id: `e-${i}`,
-      source: edge.source,
-      target: edge.target,
-      label: edge.type,
-      animated: edge.type === "calls",
-      style: { stroke: "rgba(212,165,116,0.3)", strokeWidth: 1.5 },
-      labelStyle: { fill: "#a39787", fontSize: 10 },
-    }));
+    const diffNodeIds = new Set([...changedNodeIds, ...affectedNodeIds]);
+    const flowEdges: Edge[] = filteredGraphEdges.map((edge, i) => {
+      const sourceInDiff = diffNodeIds.has(edge.source);
+      const targetInDiff = diffNodeIds.has(edge.target);
+      const isImpacted = diffMode && (sourceInDiff || targetInDiff);
+
+      return {
+        id: `e-${i}`,
+        source: edge.source,
+        target: edge.target,
+        label: edge.type,
+        animated: edge.type === "calls" || isImpacted,
+        style: isImpacted
+          ? {
+              stroke: sourceInDiff && targetInDiff
+                ? "rgba(224, 82, 82, 0.7)"
+                : "rgba(212, 160, 48, 0.5)",
+              strokeWidth: 2.5,
+            }
+          : diffMode
+            ? { stroke: "rgba(212,165,116,0.08)", strokeWidth: 1 }
+            : { stroke: "rgba(212,165,116,0.3)", strokeWidth: 1.5 },
+        labelStyle: diffMode && !isImpacted
+          ? { fill: "rgba(163,151,135,0.3)", fontSize: 10 }
+          : { fill: "#a39787", fontSize: 10 },
+      };
+    });
 
     // Run dagre layout on all nodes (without groups)
     const laid = applyDagreLayout(flowNodes, flowEdges);
@@ -190,7 +214,7 @@ export default function GraphView() {
     ];
 
     return { initialNodes: allNodes, initialEdges: laid.edges };
-  }, [graph, searchResults, selectedNodeId, showLayers, tourHighlightedNodeIds, persona, handleNodeSelect]);
+  }, [graph, searchResults, selectedNodeId, showLayers, tourHighlightedNodeIds, persona, handleNodeSelect, diffMode, changedNodeIds, affectedNodeIds]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
