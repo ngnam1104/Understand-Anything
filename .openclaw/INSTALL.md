@@ -17,6 +17,12 @@
    ln -s ~/.openclaw/understand-anything/understand-anything-plugin/skills ~/.openclaw/skills/understand-anything
    ```
 
+   **Windows (PowerShell):**
+   ```powershell
+   New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.openclaw\skills"
+   cmd /c mklink /J "$env:USERPROFILE\.openclaw\skills\understand-anything" "$env:USERPROFILE\.openclaw\understand-anything\understand-anything-plugin\skills"
+   ```
+
 3. **Restart OpenClaw** to discover the skills.
 
 ## Usage
