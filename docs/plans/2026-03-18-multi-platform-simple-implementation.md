@@ -4,9 +4,9 @@
 
 **Goal:** Make Understand-Anything skills work across Codex, OpenClaw, OpenCode, and Cursor — same files everywhere, no build step.
 
-**Architecture:** Move 5 pipeline agents into `skills/understand/` as prompt templates. Create a reusable `knowledge-graph-guide` agent. Add per-platform INSTALL.md files for AI-driven installation.
+**Architecture:** Move 5 pipeline agents into `skills/understand/` as prompt templates. Create a reusable `knowledge-graph-guide` agent. Move per-platform config directories to repo root for auto-discovery. Add Cursor and Claude plugin descriptors.
 
-**Tech Stack:** Markdown (SKILL.md, INSTALL.md), YAML frontmatter, Bash (symlink/clone commands in install docs).
+**Tech Stack:** Markdown (SKILL.md, INSTALL.md), YAML frontmatter, JSON (plugin descriptors), Bash (symlink/clone commands in install docs).
 
 **Design Doc:** `docs/plans/2026-03-18-multi-platform-simple-design.md`
 
@@ -376,332 +376,185 @@ git commit -m "feat: add knowledge-graph-guide agent for graph navigation and qu
 
 ---
 
-### Task 4: Create platform INSTALL.md files
+### Task 4: Move platform INSTALL.md files to repo root
 
 **Files:**
-- Create: `understand-anything-plugin/.codex/INSTALL.md`
-- Create: `understand-anything-plugin/.opencode/INSTALL.md`
-- Create: `understand-anything-plugin/.openclaw/INSTALL.md`
-- Create: `understand-anything-plugin/.cursor/INSTALL.md`
+- Move: `understand-anything-plugin/.codex/INSTALL.md` → `.codex/INSTALL.md`
+- Move: `understand-anything-plugin/.opencode/INSTALL.md` → `.opencode/INSTALL.md`
+- Move: `understand-anything-plugin/.openclaw/INSTALL.md` → `.openclaw/INSTALL.md`
+- Delete: `understand-anything-plugin/.cursor/INSTALL.md` (replaced by `.cursor-plugin/plugin.json`)
 
-**Step 1: Create .codex/INSTALL.md**
-
-```markdown
-# Installing Understand-Anything for Codex
-
-## Prerequisites
-
-- Git
-
-## Installation
-
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/Lum1104/Understand-Anything.git ~/.codex/understand-anything
-   ```
-
-2. **Create the skills symlink:**
-   ```bash
-   mkdir -p ~/.agents/skills
-   ln -s ~/.codex/understand-anything/understand-anything-plugin/skills ~/.agents/skills/understand-anything
-   ```
-
-   **Windows (PowerShell):**
-   ```powershell
-   New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.agents\skills"
-   cmd /c mklink /J "$env:USERPROFILE\.agents\skills\understand-anything" "$env:USERPROFILE\.codex\understand-anything\understand-anything-plugin\skills"
-   ```
-
-3. **Restart Codex** to discover the skills.
-
-## Verify
+**Step 1: Move the three platform directories to root**
 
 ```bash
-ls -la ~/.agents/skills/understand-anything
+cd /Users/yuxianglin/Desktop/opensource/Understand-Anything
+git mv understand-anything-plugin/.codex ./.codex
+git mv understand-anything-plugin/.opencode ./.opencode
+git mv understand-anything-plugin/.openclaw ./.openclaw
 ```
 
-You should see a symlink pointing to the skills directory.
-
-## Usage
-
-Skills activate automatically when relevant. You can also invoke directly:
-- "Analyze this codebase and build a knowledge graph"
-- "Help me understand this project's architecture"
-
-## Updating
+**Step 2: Delete .cursor/ (replaced by .cursor-plugin/ in Task 5)**
 
 ```bash
-cd ~/.codex/understand-anything && git pull
+git rm -r understand-anything-plugin/.cursor/
 ```
 
-Skills update instantly through the symlink.
+**Step 3: Verify symlink paths are correct**
 
-## Uninstalling
+Read each INSTALL.md. The symlink paths should reference `understand-anything-plugin/skills` — this is still correct since the skills directory remains inside the plugin wrapper.
+
+**Step 4: Commit**
 
 ```bash
-rm ~/.agents/skills/understand-anything
-rm -rf ~/.codex/understand-anything
-```
-```
-
-**Step 2: Create .opencode/INSTALL.md**
-
-```markdown
-# Installing Understand-Anything for OpenCode
-
-## Prerequisites
-
-- [OpenCode.ai](https://opencode.ai) installed
-
-## Installation
-
-Add understand-anything to the `plugin` array in your `opencode.json` (global or project-level):
-
-```json
-{
-  "plugin": ["understand-anything@git+https://github.com/Lum1104/Understand-Anything.git"]
-}
-```
-
-Restart OpenCode. The plugin auto-installs and registers all skills.
-
-## Verify
-
-Ask: "List available skills" — you should see understand, understand-chat, understand-dashboard, etc.
-
-## Usage
-
-```
-use skill tool to load understand-anything/understand
-```
-
-Or just ask: "Analyze this codebase and build a knowledge graph"
-
-## Updating
-
-Restart OpenCode — the plugin re-installs from git automatically.
-
-## Uninstalling
-
-Remove the plugin line from `opencode.json` and restart.
-```
-
-**Step 3: Create .openclaw/INSTALL.md**
-
-```markdown
-# Installing Understand-Anything for OpenClaw
-
-## Prerequisites
-
-- Git
-
-## Installation
-
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/Lum1104/Understand-Anything.git ~/.openclaw/understand-anything
-   ```
-
-2. **Create the skills symlink:**
-   ```bash
-   mkdir -p ~/.openclaw/skills
-   ln -s ~/.openclaw/understand-anything/understand-anything-plugin/skills ~/.openclaw/skills/understand-anything
-   ```
-
-3. **Restart OpenClaw** to discover the skills.
-
-## Usage
-
-- `@understand` — Analyze the current codebase
-- `@understand-chat` — Ask questions about the knowledge graph
-- `@understand-dashboard` — Launch the interactive dashboard
-
-## Updating
-
-```bash
-cd ~/.openclaw/understand-anything && git pull
-```
-
-## Uninstalling
-
-```bash
-rm ~/.openclaw/skills/understand-anything
-rm -rf ~/.openclaw/understand-anything
-```
-```
-
-**Step 4: Create .cursor/INSTALL.md**
-
-```markdown
-# Installing Understand-Anything for Cursor
-
-## Prerequisites
-
-- Git
-
-## Installation
-
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/Lum1104/Understand-Anything.git ~/.cursor/understand-anything
-   ```
-
-2. **Create the plugin symlink:**
-   ```bash
-   mkdir -p ~/.cursor/plugins
-   ln -s ~/.cursor/understand-anything/understand-anything-plugin ~/.cursor/plugins/understand-anything
-   ```
-
-3. **Restart Cursor** to discover the plugin.
-
-## Usage
-
-Skills activate automatically when relevant. Use `/understand` to analyze a codebase.
-
-## Updating
-
-```bash
-cd ~/.cursor/understand-anything && git pull
-```
-
-## Uninstalling
-
-```bash
-rm ~/.cursor/plugins/understand-anything
-rm -rf ~/.cursor/understand-anything
-```
-```
-
-**Step 5: Commit**
-
-```bash
-git add understand-anything-plugin/.codex/ understand-anything-plugin/.opencode/ understand-anything-plugin/.openclaw/ understand-anything-plugin/.cursor/
-git commit -m "feat: add per-platform INSTALL.md for AI-driven installation"
+git add -A
+git commit -m "refactor: move platform config directories to repo root for discovery"
 ```
 
 ---
 
-### Task 5: Update README with multi-platform section
+### Task 5: Add plugin descriptors
 
 **Files:**
-- Modify: `README.md`
+- Create: `.cursor-plugin/plugin.json`
+- Create: `.claude-plugin/plugin.json`
 
-**Step 1: Read the current README**
+**Step 1: Create `.cursor-plugin/plugin.json`**
 
-Read `README.md` in full to find where the installation section is.
-
-**Step 2: Add multi-platform section after the existing Quick Start**
-
-Add a new section titled "Multi-Platform Installation" with this content:
-
-```markdown
-## 🌐 Multi-Platform Installation
-
-Understand-Anything works across multiple AI coding platforms.
-
-### Claude Code (Native)
-
-```bash
-/plugin marketplace add Lum1104/Understand-Anything
-/plugin install understand-anything
-```
-
-### Codex
-
-Tell Codex:
-```
-Fetch and follow instructions from https://raw.githubusercontent.com/Lum1104/Understand-Anything/refs/heads/main/understand-anything-plugin/.codex/INSTALL.md
-```
-
-### OpenCode
-
-Add to your `opencode.json`:
 ```json
 {
-  "plugin": ["understand-anything@git+https://github.com/Lum1104/Understand-Anything.git"]
+  "name": "understand-anything",
+  "displayName": "Understand Anything",
+  "description": "AI-powered codebase understanding — analyze, visualize, and explain any project",
+  "version": "1.0.5",
+  "author": { "name": "Lum1104" },
+  "homepage": "https://github.com/Lum1104/Understand-Anything",
+  "repository": "https://github.com/Lum1104/Understand-Anything",
+  "license": "MIT",
+  "keywords": ["codebase-analysis", "knowledge-graph", "architecture", "onboarding", "dashboard"],
+  "skills": "./understand-anything-plugin/skills/",
+  "agents": "./understand-anything-plugin/agents/"
 }
 ```
 
-### OpenClaw
+Note: paths point into `understand-anything-plugin/` since the source stays nested.
 
-Tell OpenClaw:
-```
-Fetch and follow instructions from https://raw.githubusercontent.com/Lum1104/Understand-Anything/refs/heads/main/understand-anything-plugin/.openclaw/INSTALL.md
-```
+**Step 2: Create `.claude-plugin/plugin.json`**
 
-### Cursor
-
-Tell Cursor:
-```
-Fetch and follow instructions from https://raw.githubusercontent.com/Lum1104/Understand-Anything/refs/heads/main/understand-anything-plugin/.cursor/INSTALL.md
-```
-
-### Platform Compatibility
-
-| Platform | Status | Install Method |
-|----------|--------|----------------|
-| Claude Code | ✅ Native | Plugin marketplace |
-| Codex | ✅ Supported | AI-driven install |
-| OpenCode | ✅ Supported | Plugin config |
-| OpenClaw | ✅ Supported | AI-driven install |
-| Cursor | ✅ Supported | AI-driven install |
+```json
+{
+  "name": "understand-anything",
+  "description": "AI-powered codebase understanding — analyze, visualize, and explain any project",
+  "version": "1.0.5",
+  "author": { "name": "Lum1104" },
+  "homepage": "https://github.com/Lum1104/Understand-Anything",
+  "repository": "https://github.com/Lum1104/Understand-Anything",
+  "license": "MIT",
+  "keywords": ["codebase-analysis", "knowledge-graph", "architecture", "onboarding", "dashboard"]
+}
 ```
 
 **Step 3: Commit**
 
 ```bash
-git add README.md
-git commit -m "docs: add multi-platform installation instructions to README"
+git add .cursor-plugin/ .claude-plugin/plugin.json
+git commit -m "feat: add Cursor and Claude plugin descriptors for auto-discovery"
 ```
 
 ---
 
-### Task 6: Verify everything works
+### Task 6: Update README with corrected multi-platform URLs
 
-**Step 1: Check file structure**
+**Files:**
+- Modify: `README.md`
+
+**Step 1: Read current README**
+
+Read `README.md` in full.
+
+**Step 2: Update raw GitHub URLs for INSTALL.md files**
+
+The INSTALL.md files moved from `understand-anything-plugin/.codex/INSTALL.md` to `.codex/INSTALL.md`. Update all raw GitHub URLs:
+
+```
+OLD: .../refs/heads/main/understand-anything-plugin/.codex/INSTALL.md
+NEW: .../refs/heads/main/.codex/INSTALL.md
+
+OLD: .../refs/heads/main/understand-anything-plugin/.openclaw/INSTALL.md
+NEW: .../refs/heads/main/.openclaw/INSTALL.md
+
+OLD: .../refs/heads/main/understand-anything-plugin/.opencode/INSTALL.md
+NEW: .../refs/heads/main/.opencode/INSTALL.md
+```
+
+**Step 3: Replace Cursor section**
+
+Replace the Cursor AI-driven install section with:
+
+```markdown
+### Cursor
+
+Cursor auto-discovers the plugin via `.cursor-plugin/plugin.json` when this repo is cloned. No manual installation needed — just clone and open in Cursor.
+```
+
+**Step 4: Commit**
+
+```bash
+git add README.md
+git commit -m "docs: update multi-platform URLs after moving configs to root"
+```
+
+---
+
+### Task 7: Verify everything works
+
+**Step 1: Check platform configs at root**
+
+```bash
+ls .codex/INSTALL.md .opencode/INSTALL.md .openclaw/INSTALL.md
+ls .cursor-plugin/plugin.json .claude-plugin/plugin.json
+```
+
+All should exist.
+
+**Step 2: Verify plugin source is intact**
 
 ```bash
 ls understand-anything-plugin/skills/understand/
 ls understand-anything-plugin/agents/
-ls understand-anything-plugin/.codex/
-ls understand-anything-plugin/.opencode/
-ls understand-anything-plugin/.openclaw/
-ls understand-anything-plugin/.cursor/
+ls understand-anything-plugin/packages/
 ```
 
-Expected:
-- `skills/understand/`: SKILL.md + 5 *-prompt.md files
-- `agents/`: only `knowledge-graph-guide.md`
-- Each `.{platform}/`: INSTALL.md
+Skills, agents, and packages should all still exist inside the wrapper.
 
-**Step 2: Verify no old agent references remain in SKILL.md**
+**Step 3: Verify no platform configs remain inside the wrapper**
 
 ```bash
-grep -n "Dispatch the \*\*" understand-anything-plugin/skills/understand/SKILL.md
+ls understand-anything-plugin/.codex/ 2>/dev/null    # should fail
+ls understand-anything-plugin/.cursor/ 2>/dev/null   # should fail
+ls understand-anything-plugin/.opencode/ 2>/dev/null # should fail
+ls understand-anything-plugin/.openclaw/ 2>/dev/null # should fail
 ```
 
-Expected: 0 results.
-
-**Step 3: Verify prompt templates don't have agent frontmatter**
+**Step 4: Run tests**
 
 ```bash
-head -3 understand-anything-plugin/skills/understand/project-scanner-prompt.md
+pnpm --filter @understand-anything/core build && pnpm --filter @understand-anything/core test
 ```
 
-Expected: Markdown header, NOT `---` YAML frontmatter.
+All tests should pass — only config files moved, not source code.
 
-**Step 4: Verify knowledge-graph-guide has model: inherit**
+**Step 5: Verify marketplace.json is unchanged**
 
 ```bash
-grep "model:" understand-anything-plugin/agents/knowledge-graph-guide.md
+cat .claude-plugin/marketplace.json | grep source
 ```
 
-Expected: `model: inherit`
+Expected: `"source": "./understand-anything-plugin"` — unchanged, still correct.
 
-**Step 5: Run existing tests to check nothing broke**
+**Step 6: Verify no stale raw GitHub URLs**
 
 ```bash
-cd understand-anything-plugin && pnpm test
+grep -r "understand-anything-plugin/\." README.md
 ```
 
-Expected: All tests pass (tests don't reference agent files directly).
+Expected: 0 results (no URLs pointing to old nested platform config locations).
