@@ -19,6 +19,14 @@ export {
   parseProjectSummaryResponse,
 } from "./analyzer/llm-analyzer.js";
 export type { LLMFileAnalysis, LLMProjectSummary } from "./analyzer/llm-analyzer.js";
+export {
+  normalizeNodeId,
+  normalizeComplexity,
+  normalizeBatchOutput,
+  type DroppedEdge,
+  type NormalizationStats,
+  type NormalizeBatchResult,
+} from "./analyzer/normalize-graph.js";
 export { SearchEngine, type SearchResult, type SearchOptions } from "./search.js";
 export {
   getChangedFiles,

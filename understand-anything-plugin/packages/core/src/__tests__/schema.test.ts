@@ -719,4 +719,12 @@ describe("Extended node/edge types", () => {
       expect(result.data!.edges[0].type).toBe(canonical);
     }
   });
+
+  it("accepts node with bare string ID (schema is lenient on format)", () => {
+    const graph = structuredClone(validGraph);
+    graph.nodes[0].id = "src/foo.ts";
+
+    const result = validateGraph(graph);
+    expect(result.success).toBe(true);
+  });
 });

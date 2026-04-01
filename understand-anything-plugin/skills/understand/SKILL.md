@@ -174,11 +174,28 @@ After batches complete, merge with the existing graph:
 
 ## Phase 3 — ASSEMBLE
 
-Merge all file-analyzer results into a single set of nodes and edges. Then perform basic integrity cleanup:
+Merge all file-analyzer results into a single set of nodes and edges. Then perform normalization and integrity cleanup **in this order**:
 
-- Remove any edge whose `source` or `target` references a node ID that does not exist in the merged node set
-- Remove duplicate node IDs (keep the last occurrence)
-- Log any removed edges or nodes for the final summary
+1. **Normalize node IDs:** For every node, verify the `id` field follows the convention `<type-prefix>:<path>` where type-prefix is one of `file`, `func`, `class`, `module`, `concept`, `config`, `document`, `service`, `table`, `endpoint`, `pipeline`, `schema`, `resource`. Apply these fixes:
+   - If the ID has a double prefix (e.g., `file:file:src/foo.ts`), strip the duplicate prefix.
+   - If the ID has a project-name prefix (e.g., `my-project:file:src/foo.ts`), strip the project-name portion.
+   - If the ID is a bare file path with no prefix, add the appropriate prefix based on the node's `type` field: `file` → `file:<path>`, `function` → `func:<filePath>:<name>`, `class` → `class:<filePath>:<name>`.
+   - Build a mapping of original IDs → corrected IDs.
+
+2. **Normalize complexity values:** For every node, verify `complexity` is one of `"simple"`, `"moderate"`, `"complex"`. Apply these mappings for invalid values:
+   - `"low"`, `"easy"` → `"simple"`
+   - `"medium"`, `"intermediate"` → `"moderate"`
+   - `"high"`, `"hard"`, `"difficult"` → `"complex"`
+   - Numeric 1-3 → `"simple"`, 4-6 → `"moderate"`, 7-10 → `"complex"`
+   - Any other value → `"moderate"`
+
+3. **Rewrite edge references:** Using the ID mapping from step 1, update every edge's `source` and `target` fields. This prevents cascading edge drops when only the ID format was wrong.
+
+4. **Remove duplicate node IDs:** If duplicate node IDs exist after normalization, keep the last occurrence.
+
+5. **Remove dangling edges:** Remove any edge whose `source` or `target` references a node ID that does not exist in the merged node set.
+
+6. **Log changes:** Record counts of IDs corrected, complexity values fixed, edges rewritten, duplicates removed, and dangling edges dropped. Include these counts in the Phase warnings list passed to the reviewer.
 
 ---
 

@@ -444,6 +444,8 @@ You MUST use these exact prefixes for node IDs:
 
 **Scope restriction:** Only produce node types listed above. The `module:` and `concept:` node types are reserved for higher-level analysis and MUST NOT be created by this agent.
 
+> **WARNING:** Node IDs MUST use the exact prefix formats shown above. Do NOT prefix IDs with the project name (e.g., `my-project:file:src/foo.ts` is WRONG). Do NOT use bare file paths without a type prefix (e.g., `src/foo.ts` is WRONG). Invalid IDs will be auto-corrected during assembly, which may cause unexpected edge rewiring.
+
 ## Output Format
 
 Produce a single, valid JSON block. Validate it mentally before writing -- malformed JSON breaks the entire pipeline.
