@@ -3,6 +3,7 @@ import { validateGraph } from "@understand-anything/core/schema";
 import type { GraphIssue } from "@understand-anything/core/schema";
 import { useDashboardStore } from "./store";
 import GraphView from "./components/GraphView";
+import DomainGraphView from "./components/DomainGraphView";
 import CodeViewer from "./components/CodeViewer";
 import SearchBar from "./components/SearchBar";
 import NodeInfo from "./components/NodeInfo";
@@ -448,7 +449,11 @@ function Dashboard({ accessToken }: { accessToken: string }) {
       <div className="flex-1 flex min-h-0 relative">
         {/* Graph area */}
         <div className="flex-1 min-w-0 min-h-0 relative">
-          <GraphView />
+          {viewMode === "domain" && domainGraph ? (
+            <DomainGraphView />
+          ) : (
+            <GraphView />
+          )}
           <div className="absolute top-3 right-3 text-sm text-text-muted/60 pointer-events-none select-none">
             Press <kbd className="kbd">?</kbd> for keyboard shortcuts
           </div>
