@@ -70,10 +70,17 @@ function buildDomainOverview(graph: KnowledgeGraph): { nodes: Node[]; edges: Edg
       label: e.description ?? "",
       style: { stroke: "var(--color-accent)", strokeDasharray: "6 3", strokeWidth: 2 },
       labelStyle: { fill: "var(--color-text-muted)", fontSize: 10 },
+      labelBgStyle: { fill: "var(--color-surface)", fillOpacity: 0.9 },
+      labelBgPadding: [6, 4] as [number, number],
+      labelBgBorderRadius: 4,
       animated: true,
     }));
 
-  return applyDagreLayout(rfNodes, rfEdges, "LR", dims);
+  // Compute spacing based on longest edge label (~6px per char at fontSize 10)
+  const maxLabelLen = Math.max(0, ...rfEdges.map((e) => String(e.label ?? "").length));
+  const ranksep = Math.max(120, maxLabelLen * 6);
+
+  return applyDagreLayout(rfNodes, rfEdges, "LR", dims, { ranksep });
 }
 
 function buildDomainDetail(

@@ -16,6 +16,7 @@ export function applyDagreLayout(
   edges: Edge[],
   direction: "TB" | "LR" = "TB",
   nodeDimensions?: Map<string, { width: number; height: number }>,
+  spacingOverrides?: { nodesep?: number; ranksep?: number },
 ): { nodes: Node[]; edges: Edge[] } {
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
@@ -24,8 +25,8 @@ export function applyDagreLayout(
   const isLarge = nodes.length > 50;
   g.setGraph({
     rankdir: direction,
-    nodesep: isLarge ? 80 : 60,
-    ranksep: isLarge ? 120 : 80,
+    nodesep: spacingOverrides?.nodesep ?? (isLarge ? 80 : 60),
+    ranksep: spacingOverrides?.ranksep ?? (isLarge ? 120 : 80),
     marginx: 20,
     marginy: 20,
   });
