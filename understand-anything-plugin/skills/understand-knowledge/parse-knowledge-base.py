@@ -221,15 +221,31 @@ def parse_log(log_path: Path) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def build_name_to_stem_map(wiki_root: Path) -> dict[str, str]:
-    """Build a case-insensitive map from filename stem to relative stem path."""
+    """Build a case-insensitive map from filename stem to relative stem path.
+
+    Full relative paths always map uniquely. Bare basenames map only when
+    unambiguous — duplicate basenames are removed so they don't silently
+    resolve to the wrong page.
+    """
     name_map: dict[str, str] = {}
+    # Track which bare basenames appear more than once
+    basename_counts: dict[str, int] = {}
     for md_file in wiki_root.rglob("*.md"):
         rel = md_file.relative_to(wiki_root)
         stem = str(rel.with_suffix(""))  # e.g., "decisions/decision-foo"
         basename = md_file.stem            # e.g., "decision-foo"
-        # Map both full relative path and bare filename (for flat wikilink resolution)
+        # Full relative path always maps uniquely
         name_map[stem.lower()] = stem
-        name_map[basename.lower()] = stem
+        # Track basename for ambiguity detection
+        key = basename.lower()
+        basename_counts[key] = basename_counts.get(key, 0) + 1
+        name_map[key] = stem
+
+    # Remove ambiguous basename entries (appear more than once)
+    for key, count in basename_counts.items():
+        if count > 1 and key in name_map:
+            del name_map[key]
+
     return name_map
 
 
@@ -292,13 +308,14 @@ def parse_wiki(root: Path) -> dict:
             category_lookup[article_target.lower()] = cat["name"]
 
     # --- Pre-compute article IDs (for edge resolution validation) ---
-    # Must use the same filter logic as the main loop (skip if EITHER matches INFRA_FILES)
+    # Only skip infra files at the wiki root level, not in subdirectories
+    # (e.g., wiki/index.md is infra, but wiki/concepts/index.md is content)
     article_ids: set[str] = set()
     for md_file in sorted(wiki_root.rglob("*.md")):
         rel = md_file.relative_to(wiki_root)
         stem = str(rel.with_suffix(""))
-        basename = md_file.stem
-        if basename.lower() in INFRA_FILES or rel.name.lower() in INFRA_FILES:
+        # Only filter infra files at root level (no parent directory)
+        if rel.parent == Path(".") and rel.name.lower() in INFRA_FILES:
             continue
         article_ids.add(f"article:{stem}")
 
@@ -313,8 +330,8 @@ def parse_wiki(root: Path) -> dict:
         stem = str(rel.with_suffix(""))
         basename = md_file.stem
 
-        # Skip infrastructure files
-        if basename.lower() in INFRA_FILES or rel.name.lower() in INFRA_FILES:
+        # Skip infrastructure files only at wiki root level
+        if rel.parent == Path(".") and rel.name.lower() in INFRA_FILES:
             continue
 
         text = md_file.read_text(encoding="utf-8", errors="replace")

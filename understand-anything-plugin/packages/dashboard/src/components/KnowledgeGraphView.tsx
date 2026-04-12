@@ -37,7 +37,6 @@ const EDGE_STYLES: Record<string, React.CSSProperties> = {
 function getNodeDimensions(
   edgeCount: number,
 ): { width: number; height: number } {
-  // Scale width/height by degree (connections)
   const scale = Math.min(1.5, Math.max(0.85, 0.85 + edgeCount * 0.03));
   return {
     width: Math.round(NODE_WIDTH * scale),
@@ -45,22 +44,19 @@ function getNodeDimensions(
   };
 }
 
-function buildKnowledgeGraph(
+/**
+ * Compute the stable layout (positions) from graph topology.
+ * This only re-runs when the graph data or filters change, NOT on selection/search.
+ */
+function computeLayout(
   graph: KnowledgeGraph,
-  selectedNodeId: string | null,
-  focusNodeId: string | null,
-  searchResults: Map<string, number>,
-  tourHighlightedNodeIds: Set<string>,
-  onNodeClick: (nodeId: string) => void,
-): { nodes: Node[]; edges: Edge[] } {
-  // Count edges per node for degree-proportional sizing
+): { positionMap: Map<string, { x: number; y: number }>; edgeCounts: Map<string, number>; communityMap: Map<string, number> } {
   const edgeCounts = new Map<string, number>();
   for (const edge of graph.edges) {
     edgeCounts.set(edge.source, (edgeCounts.get(edge.source) ?? 0) + 1);
     edgeCounts.set(edge.target, (edgeCounts.get(edge.target) ?? 0) + 1);
   }
 
-  // Build community map from layers
   const communityMap = new Map<string, number>();
   graph.layers.forEach((layer, i) => {
     for (const nodeId of layer.nodeIds) {
@@ -68,83 +64,33 @@ function buildKnowledgeGraph(
     }
   });
 
-  // Determine neighbor IDs for focus/selection fading
-  const neighborIds = new Set<string>();
-  if (focusNodeId || selectedNodeId) {
-    const focusId = focusNodeId ?? selectedNodeId;
-    for (const edge of graph.edges) {
-      if (edge.source === focusId) neighborIds.add(edge.target);
-      if (edge.target === focusId) neighborIds.add(edge.source);
-    }
-  }
-
-  // Build node dimensions map
   const dims = new Map<string, { width: number; height: number }>();
   for (const node of graph.nodes) {
-    const d = getNodeDimensions(edgeCounts.get(node.id) ?? 0);
-    dims.set(node.id, d);
+    dims.set(node.id, getNodeDimensions(edgeCounts.get(node.id) ?? 0));
   }
 
-  // Build xyflow nodes
-  const rfNodes: Node[] = graph.nodes.map((node) => {
-    const isSelected = node.id === selectedNodeId;
-    const isFocused = node.id === focusNodeId;
-    const isNeighbor = neighborIds.has(node.id);
-    const isSelectionFaded =
-      (focusNodeId || selectedNodeId) &&
-      !isSelected &&
-      !isFocused &&
-      !isNeighbor;
-    const searchScore = searchResults.get(node.id);
-    const isHighlighted = searchScore !== undefined;
-    const isTourHighlighted = tourHighlightedNodeIds.has(node.id);
+  // Build temporary nodes/edges for layout computation only
+  const tmpNodes: Node[] = graph.nodes.map((node) => ({
+    id: node.id,
+    type: "custom" as const,
+    position: { x: 0, y: 0 },
+    data: {},
+  }));
 
-    const data: CustomNodeData = {
-      label: node.name,
-      nodeType: node.type,
-      summary: node.summary,
-      complexity: node.complexity,
-      isHighlighted,
-      searchScore,
-      isSelected,
-      isTourHighlighted,
-      isDiffChanged: false,
-      isDiffAffected: false,
-      isDiffFaded: false,
-      isNeighbor,
-      isSelectionFaded: !!isSelectionFaded,
-      onNodeClick,
-      incomingCount: edgeCounts.get(node.id) ?? 0,
-      tags: node.tags,
-    };
+  const tmpEdges: Edge[] = graph.edges.map((e, i) => ({
+    id: `ke-${i}`,
+    source: e.source,
+    target: e.target,
+  }));
 
-    return {
-      id: node.id,
-      type: "custom" as const,
-      position: { x: 0, y: 0 },
-      data,
-    };
-  });
+  const { nodes: layoutedNodes } = applyForceLayout(tmpNodes, tmpEdges, dims, communityMap);
 
-  // Build xyflow edges
-  const rfEdges: Edge[] = graph.edges.map((e, i) => {
-    const style = EDGE_STYLES[e.type] ?? EDGE_STYLES.related;
-    return {
-      id: `ke-${i}-${e.source}-${e.target}`,
-      source: e.source,
-      target: e.target,
-      style,
-      animated: e.type === "contradicts",
-      label: e.type !== "related" && e.type !== "categorized_under" ? e.type.replace(/_/g, " ") : undefined,
-      labelStyle: { fill: "var(--color-text-muted)", fontSize: 9, opacity: 0.7 },
-      labelBgStyle: { fill: "var(--color-surface)", fillOpacity: 0.9 },
-      labelBgPadding: [4, 2] as [number, number],
-      labelBgBorderRadius: 3,
-    };
-  });
+  const positionMap = new Map<string, { x: number; y: number }>();
+  for (const n of layoutedNodes) {
+    positionMap.set(n.id, n.position);
+  }
 
-  // Apply force layout with community clustering
-  return applyForceLayout(rfNodes, rfEdges, dims, communityMap);
+  return { positionMap, edgeCounts, communityMap };
 }
 
 function KnowledgeGraphViewInner() {
@@ -171,10 +117,10 @@ function KnowledgeGraphViewInner() {
     [tourHighlightedNodeIds],
   );
 
-  const { nodes, edges } = useMemo(() => {
-    if (!graph) return { nodes: [], edges: [] };
+  // Filter graph — only recompute when graph data or filters change
+  const filteredGraph = useMemo((): KnowledgeGraph | null => {
+    if (!graph) return null;
 
-    // Filter graph by active node type filters
     const filteredNodes = graph.nodes.filter((n) => {
       if (["article", "entity", "topic", "claim", "source"].includes(n.type)) {
         return nodeTypeFilters.knowledge !== false;
@@ -187,21 +133,86 @@ function KnowledgeGraphViewInner() {
       (e) => filteredNodeIds.has(e.source) && filteredNodeIds.has(e.target),
     );
 
-    const filteredGraph: KnowledgeGraph = {
-      ...graph,
-      nodes: filteredNodes,
-      edges: filteredEdges,
-    };
+    return { ...graph, nodes: filteredNodes, edges: filteredEdges };
+  }, [graph, nodeTypeFilters]);
 
-    return buildKnowledgeGraph(
-      filteredGraph,
-      selectedNodeId,
-      focusNodeId,
-      searchResults,
-      tourSet,
-      onNodeClick,
-    );
-  }, [graph, selectedNodeId, focusNodeId, searchResults, tourSet, onNodeClick, nodeTypeFilters]);
+  // Compute layout ONCE per graph/filter change — stable positions
+  const { positionMap, edgeCounts } = useMemo(() => {
+    if (!filteredGraph) return { positionMap: new Map(), edgeCounts: new Map() };
+    return computeLayout(filteredGraph);
+  }, [filteredGraph]);
+
+  // Build visual nodes/edges — recomputes on selection/search/tour WITHOUT re-layout
+  const { nodes, edges } = useMemo(() => {
+    if (!filteredGraph) return { nodes: [], edges: [] };
+
+    const neighborIds = new Set<string>();
+    if (focusNodeId || selectedNodeId) {
+      const focusId = focusNodeId ?? selectedNodeId;
+      for (const edge of filteredGraph.edges) {
+        if (edge.source === focusId) neighborIds.add(edge.target);
+        if (edge.target === focusId) neighborIds.add(edge.source);
+      }
+    }
+
+    const rfNodes: Node[] = filteredGraph.nodes.map((node) => {
+      const isSelected = node.id === selectedNodeId;
+      const isFocused = node.id === focusNodeId;
+      const isNeighbor = neighborIds.has(node.id);
+      const isSelectionFaded =
+        (focusNodeId || selectedNodeId) &&
+        !isSelected &&
+        !isFocused &&
+        !isNeighbor;
+      const searchScore = searchResults.get(node.id);
+      const isHighlighted = searchScore !== undefined;
+      const isTourHighlighted = tourSet.has(node.id);
+
+      const data: CustomNodeData = {
+        label: node.name,
+        nodeType: node.type,
+        summary: node.summary,
+        complexity: node.complexity,
+        isHighlighted,
+        searchScore,
+        isSelected,
+        isTourHighlighted,
+        isDiffChanged: false,
+        isDiffAffected: false,
+        isDiffFaded: false,
+        isNeighbor,
+        isSelectionFaded: !!isSelectionFaded,
+        onNodeClick,
+        incomingCount: edgeCounts.get(node.id) ?? 0,
+        tags: node.tags,
+      };
+
+      return {
+        id: node.id,
+        type: "custom" as const,
+        position: positionMap.get(node.id) ?? { x: 0, y: 0 },
+        data,
+      };
+    });
+
+    const rfEdges: Edge[] = filteredGraph.edges.map((e) => {
+      const style = EDGE_STYLES[e.type] ?? EDGE_STYLES.related;
+      return {
+        id: `ke-${e.source}-${e.target}-${e.type}`,
+        source: e.source,
+        target: e.target,
+        style,
+        animated: e.type === "contradicts",
+        label: e.type !== "related" && e.type !== "categorized_under" ? e.type.replace(/_/g, " ") : undefined,
+        labelStyle: { fill: "var(--color-text-muted)", fontSize: 9, opacity: 0.7 },
+        labelBgStyle: { fill: "var(--color-surface)", fillOpacity: 0.9 },
+        labelBgPadding: [4, 2] as [number, number],
+        labelBgBorderRadius: 3,
+      };
+    });
+
+    return { nodes: rfNodes, edges: rfEdges };
+  }, [filteredGraph, selectedNodeId, focusNodeId, searchResults, tourSet, onNodeClick, positionMap, edgeCounts]);
 
   if (!graph) {
     return (
