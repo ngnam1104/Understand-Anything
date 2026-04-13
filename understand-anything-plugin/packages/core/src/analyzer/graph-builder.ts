@@ -406,7 +406,7 @@ export class GraphBuilder {
       version: "1.0.0",
       project: {
         name: this.projectName,
-        languages: [...this.languages].sort(),
+        languages: [...this.languages].sort((a, b) => a.localeCompare(b)),
         frameworks: [],
         description: "",
         analyzedAt: new Date().toISOString(),
