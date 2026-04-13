@@ -35,6 +35,27 @@ interface NonCodeFileAnalysisMeta extends NonCodeFileMeta {
   sections?: SectionInfo[];
 }
 
+const KIND_TO_NODE_TYPE: Record<string, GraphNode["type"]> = {
+  table: "table",
+  view: "table",
+  index: "table",
+  message: "schema",
+  type: "schema",
+  enum: "schema",
+  resource: "resource",
+  module: "resource",
+  service: "service",
+  deployment: "service",
+  job: "pipeline",
+  stage: "pipeline",
+  target: "pipeline",
+  route: "endpoint",
+  query: "endpoint",
+  mutation: "endpoint",
+  variable: "config",
+  output: "config",
+};
+
 const EXTENSION_LANGUAGE: Record<string, string> = {
   // Code languages
   ".ts": "typescript",
@@ -102,15 +123,21 @@ function detectLanguage(filePath: string): string {
 }
 
 export class GraphBuilder {
-  private nodes: GraphNode[] = [];
-  private edges: GraphEdge[] = [];
-  private languages = new Set<string>();
-  private projectName: string;
-  private gitHash: string;
+  private readonly nodes: GraphNode[] = [];
+  private readonly edges: GraphEdge[] = [];
+  private readonly languages = new Set<string>();
+  private readonly nodeIds = new Set<string>();
+  private readonly edgeKeys = new Set<string>();
+  private readonly projectName: string;
+  private readonly gitHash: string;
 
   constructor(projectName: string, gitHash: string) {
     this.projectName = projectName;
     this.gitHash = gitHash;
+  }
+
+  private static basename(filePath: string): string {
+    return filePath.split("/").pop() ?? filePath;
   }
 
   addFile(filePath: string, meta: FileMeta): void {
@@ -119,10 +146,12 @@ export class GraphBuilder {
       this.languages.add(lang);
     }
 
-    const name = filePath.split("/").pop() ?? filePath;
+    const name = GraphBuilder.basename(filePath);
 
+    const id = `file:${filePath}`;
+    this.nodeIds.add(id);
     this.nodes.push({
-      id: `file:${filePath}`,
+      id,
       type: "file",
       name,
       filePath,
@@ -142,10 +171,11 @@ export class GraphBuilder {
       this.languages.add(lang);
     }
 
-    const fileName = filePath.split("/").pop() ?? filePath;
+    const fileName = GraphBuilder.basename(filePath);
     const fileId = `file:${filePath}`;
 
     // Create the file node
+    this.nodeIds.add(fileId);
     this.nodes.push({
       id: fileId,
       type: "file",
@@ -159,6 +189,7 @@ export class GraphBuilder {
     // Create function nodes with "contains" edges
     for (const fn of analysis.functions) {
       const funcId = `function:${filePath}:${fn.name}`;
+      this.nodeIds.add(funcId);
       this.nodes.push({
         id: funcId,
         type: "function",
@@ -182,6 +213,7 @@ export class GraphBuilder {
     // Create class nodes with "contains" edges
     for (const cls of analysis.classes) {
       const classId = `class:${filePath}:${cls.name}`;
+      this.nodeIds.add(classId);
       this.nodes.push({
         id: classId,
         type: "class",
@@ -204,6 +236,9 @@ export class GraphBuilder {
   }
 
   addImportEdge(fromFile: string, toFile: string): void {
+    const key = `imports|file:${fromFile}|file:${toFile}`;
+    if (this.edgeKeys.has(key)) return;
+    this.edgeKeys.add(key);
     this.edges.push({
       source: `file:${fromFile}`,
       target: `file:${toFile}`,
@@ -219,6 +254,9 @@ export class GraphBuilder {
     calleeFile: string,
     calleeFunc: string,
   ): void {
+    const key = `calls|function:${callerFile}:${callerFunc}|function:${calleeFile}:${calleeFunc}`;
+    if (this.edgeKeys.has(key)) return;
+    this.edgeKeys.add(key);
     this.edges.push({
       source: `function:${callerFile}:${callerFunc}`,
       target: `function:${calleeFile}:${calleeFunc}`,
@@ -228,12 +266,14 @@ export class GraphBuilder {
     });
   }
 
-  addNonCodeFile(filePath: string, meta: NonCodeFileMeta): void {
+  addNonCodeFile(filePath: string, meta: NonCodeFileMeta): string {
     const lang = detectLanguage(filePath);
     if (lang !== "unknown") this.languages.add(lang);
-    const name = filePath.split("/").pop() ?? filePath;
+    const name = GraphBuilder.basename(filePath);
+    const id = `${meta.nodeType ?? "file"}:${filePath}`;
+    this.nodeIds.add(id);
     this.nodes.push({
-      id: `${meta.nodeType ?? "file"}:${filePath}`,
+      id,
       type: meta.nodeType,
       name,
       filePath,
@@ -241,24 +281,16 @@ export class GraphBuilder {
       tags: meta.tags,
       complexity: meta.complexity,
     });
+    return id;
   }
 
   addNonCodeFileWithAnalysis(filePath: string, meta: NonCodeFileAnalysisMeta): void {
-    this.addNonCodeFile(filePath, meta);
-    const fileId = `${meta.nodeType ?? "file"}:${filePath}`;
-
-    const existingIds = new Set(this.nodes.map(n => n.id));
+    const fileId = this.addNonCodeFile(filePath, meta);
 
     // Create child nodes for definitions (tables, schemas, etc.)
     for (const def of meta.definitions ?? []) {
-      const childId = `${def.kind}:${filePath}:${def.name}`;
-      if (existingIds.has(childId)) {
-        console.warn(`[GraphBuilder] Duplicate node ID "${childId}" — skipping`);
-        continue;
-      }
-      existingIds.add(childId);
-      this.nodes.push({
-        id: childId,
+      this.addChildNode({
+        id: `${def.kind}:${filePath}:${def.name}`,
         type: this.mapKindToNodeType(def.kind),
         name: def.name,
         filePath,
@@ -266,61 +298,41 @@ export class GraphBuilder {
         summary: `${def.kind}: ${def.name} (${def.fields.length} fields)`,
         tags: [],
         complexity: meta.complexity,
-      });
-      this.edges.push({ source: fileId, target: childId, type: "contains", direction: "forward", weight: 1 });
+      }, fileId);
     }
 
     // Create child nodes for services
     for (const svc of meta.services ?? []) {
-      const childId = `service:${filePath}:${svc.name}`;
-      if (existingIds.has(childId)) {
-        console.warn(`[GraphBuilder] Duplicate node ID "${childId}" — skipping`);
-        continue;
-      }
-      existingIds.add(childId);
-      this.nodes.push({
-        id: childId,
+      this.addChildNode({
+        id: `service:${filePath}:${svc.name}`,
         type: "service",
         name: svc.name,
         filePath,
         summary: `Service ${svc.name}${svc.image ? ` (image: ${svc.image})` : ""}`,
         tags: [],
         complexity: meta.complexity,
-      });
-      this.edges.push({ source: fileId, target: childId, type: "contains", direction: "forward", weight: 1 });
+      }, fileId);
     }
 
     // Create child nodes for endpoints
     for (const ep of meta.endpoints ?? []) {
-      const childId = `endpoint:${filePath}:${ep.path}`;
-      if (existingIds.has(childId)) {
-        console.warn(`[GraphBuilder] Duplicate node ID "${childId}" — skipping`);
-        continue;
-      }
-      existingIds.add(childId);
-      this.nodes.push({
-        id: childId,
+      const name = `${ep.method ?? ""} ${ep.path}`.trim();
+      this.addChildNode({
+        id: `endpoint:${filePath}:${ep.path}`,
         type: "endpoint",
-        name: `${ep.method ?? ""} ${ep.path}`.trim(),
+        name,
         filePath,
         lineRange: ep.lineRange,
-        summary: `Endpoint: ${ep.method ?? ""} ${ep.path}`.trim(),
+        summary: `Endpoint: ${name}`,
         tags: [],
         complexity: meta.complexity,
-      });
-      this.edges.push({ source: fileId, target: childId, type: "contains", direction: "forward", weight: 1 });
+      }, fileId);
     }
 
     // Create child nodes for steps (pipeline/makefile targets)
     for (const step of meta.steps ?? []) {
-      const childId = `step:${filePath}:${step.name}`;
-      if (existingIds.has(childId)) {
-        console.warn(`[GraphBuilder] Duplicate node ID "${childId}" — skipping`);
-        continue;
-      }
-      existingIds.add(childId);
-      this.nodes.push({
-        id: childId,
+      this.addChildNode({
+        id: `step:${filePath}:${step.name}`,
         type: "pipeline",
         name: step.name,
         filePath,
@@ -328,20 +340,13 @@ export class GraphBuilder {
         summary: `Step: ${step.name}`,
         tags: [],
         complexity: meta.complexity,
-      });
-      this.edges.push({ source: fileId, target: childId, type: "contains", direction: "forward", weight: 1 });
+      }, fileId);
     }
 
     // Create child nodes for resources (Terraform, etc.)
     for (const res of meta.resources ?? []) {
-      const childId = `resource:${filePath}:${res.name}`;
-      if (existingIds.has(childId)) {
-        console.warn(`[GraphBuilder] Duplicate node ID "${childId}" — skipping`);
-        continue;
-      }
-      existingIds.add(childId);
-      this.nodes.push({
-        id: childId,
+      this.addChildNode({
+        id: `resource:${filePath}:${res.name}`,
         type: "resource",
         name: res.name,
         filePath,
@@ -349,33 +354,22 @@ export class GraphBuilder {
         summary: `Resource: ${res.name} (${res.kind})`,
         tags: [],
         complexity: meta.complexity,
-      });
-      this.edges.push({ source: fileId, target: childId, type: "contains", direction: "forward", weight: 1 });
+      }, fileId);
     }
   }
 
+  private addChildNode(node: GraphNode, parentId: string): void {
+    if (this.nodeIds.has(node.id)) {
+      console.warn(`[GraphBuilder] Duplicate node ID "${node.id}" — skipping`);
+      return;
+    }
+    this.nodeIds.add(node.id);
+    this.nodes.push(node);
+    this.edges.push({ source: parentId, target: node.id, type: "contains", direction: "forward", weight: 1 });
+  }
+
   private mapKindToNodeType(kind: string): GraphNode["type"] {
-    const mapping: Record<string, GraphNode["type"]> = {
-      table: "table",
-      view: "table",
-      index: "table",
-      message: "schema",
-      type: "schema",
-      enum: "schema",
-      resource: "resource",
-      module: "resource",
-      service: "service",
-      deployment: "service",
-      job: "pipeline",
-      stage: "pipeline",
-      target: "pipeline",
-      route: "endpoint",
-      query: "endpoint",
-      mutation: "endpoint",
-      variable: "config",
-      output: "config",
-    };
-    const mapped = mapping[kind];
+    const mapped = KIND_TO_NODE_TYPE[kind];
     if (!mapped) {
       console.warn(`[GraphBuilder] Unknown definition kind "${kind}" — falling back to "concept" node type`);
     }
@@ -387,14 +381,14 @@ export class GraphBuilder {
       version: "1.0.0",
       project: {
         name: this.projectName,
-        languages: [...this.languages].sort(),
+        languages: [...this.languages].sort((a, b) => a.localeCompare(b)),
         frameworks: [],
         description: "",
         analyzedAt: new Date().toISOString(),
         gitCommitHash: this.gitHash,
       },
-      nodes: this.nodes,
-      edges: this.edges,
+      nodes: [...this.nodes],
+      edges: [...this.edges],
       layers: [],
       tour: [],
     };
