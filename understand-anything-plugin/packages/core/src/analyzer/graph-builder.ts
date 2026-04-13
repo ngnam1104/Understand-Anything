@@ -35,6 +35,27 @@ interface NonCodeFileAnalysisMeta extends NonCodeFileMeta {
   sections?: SectionInfo[];
 }
 
+const KIND_TO_NODE_TYPE: Record<string, GraphNode["type"]> = {
+  table: "table",
+  view: "table",
+  index: "table",
+  message: "schema",
+  type: "schema",
+  enum: "schema",
+  resource: "resource",
+  module: "resource",
+  service: "service",
+  deployment: "service",
+  job: "pipeline",
+  stage: "pipeline",
+  target: "pipeline",
+  route: "endpoint",
+  query: "endpoint",
+  mutation: "endpoint",
+  variable: "config",
+  output: "config",
+};
+
 const EXTENSION_LANGUAGE: Record<string, string> = {
   // Code languages
   ".ts": "typescript",
@@ -102,11 +123,11 @@ function detectLanguage(filePath: string): string {
 }
 
 export class GraphBuilder {
-  private nodes: GraphNode[] = [];
-  private edges: GraphEdge[] = [];
-  private languages = new Set<string>();
-  private projectName: string;
-  private gitHash: string;
+  private readonly nodes: GraphNode[] = [];
+  private readonly edges: GraphEdge[] = [];
+  private readonly languages = new Set<string>();
+  private readonly projectName: string;
+  private readonly gitHash: string;
 
   constructor(projectName: string, gitHash: string) {
     this.projectName = projectName;
@@ -355,27 +376,7 @@ export class GraphBuilder {
   }
 
   private mapKindToNodeType(kind: string): GraphNode["type"] {
-    const mapping: Record<string, GraphNode["type"]> = {
-      table: "table",
-      view: "table",
-      index: "table",
-      message: "schema",
-      type: "schema",
-      enum: "schema",
-      resource: "resource",
-      module: "resource",
-      service: "service",
-      deployment: "service",
-      job: "pipeline",
-      stage: "pipeline",
-      target: "pipeline",
-      route: "endpoint",
-      query: "endpoint",
-      mutation: "endpoint",
-      variable: "config",
-      output: "config",
-    };
-    const mapped = mapping[kind];
+    const mapped = KIND_TO_NODE_TYPE[kind];
     if (!mapped) {
       console.warn(`[GraphBuilder] Unknown definition kind "${kind}" — falling back to "concept" node type`);
     }
