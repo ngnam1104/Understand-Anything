@@ -39,9 +39,6 @@ jobs:
       - name: Build homepage
         working-directory: homepage
         run: pnpm build
-        env:
-          VITE_STRUCTURAL_VIDEO_URL: ${{ vars.DEMO_STRUCTURAL_VIDEO_URL }}
-          VITE_DOMAIN_VIDEO_URL: ${{ vars.DEMO_DOMAIN_VIDEO_URL }}
 
       - name: Build core
         run: pnpm --filter @understand-anything/core build
