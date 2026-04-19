@@ -4,7 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 
 export default defineConfig({
-  base: "/Understand-Anything/demo/",
+  base: "/demo/",
 
   resolve: {
     alias: {
