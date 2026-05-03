@@ -23,7 +23,12 @@ import ContainerNode from "./ContainerNode";
 import type { ContainerFlowNode } from "./ContainerNode";
 import Breadcrumb from "./Breadcrumb";
 import { useDashboardStore } from "../store";
-import type { GraphEdge, KnowledgeGraph, NodeType } from "@understand-anything/core/types";
+import type {
+  GraphEdge,
+  GraphNode,
+  KnowledgeGraph,
+  NodeType,
+} from "@understand-anything/core/types";
 import { useTheme } from "../themes/index.ts";
 import {
   NODE_WIDTH,
@@ -264,6 +269,7 @@ interface LayerDetailTopology {
   portalNodes: PortalFlowNode[];
   portalEdges: Edge[];
   filteredEdges: KnowledgeGraph["edges"];
+  filteredNodes: GraphNode[];
   containers: DerivedContainer[];
   nodeToContainer: Map<string, string>;
   intraContainer: GraphEdge[];
@@ -275,6 +281,7 @@ const EMPTY_TOPOLOGY: LayerDetailTopology = {
   portalNodes: [],
   portalEdges: [],
   filteredEdges: [],
+  filteredNodes: [],
   containers: [],
   nodeToContainer: new Map(),
   intraContainer: [],
@@ -520,6 +527,7 @@ function useLayerDetailTopology(): LayerDetailTopology {
       ungrouped,
       nodeToContainer,
       intraContainer,
+      filteredGraphNodes,
       filteredGraphEdges,
       containerFlowNodes,
       ungroupedFlowNodes,
@@ -553,6 +561,7 @@ function useLayerDetailTopology(): LayerDetailTopology {
       containers,
       nodeToContainer,
       intraContainer,
+      filteredGraphNodes,
       filteredGraphEdges,
       containerFlowNodes,
       ungroupedFlowNodes,
@@ -620,6 +629,7 @@ function useLayerDetailTopology(): LayerDetailTopology {
           portalNodes,
           portalEdges,
           filteredEdges: filteredGraphEdges,
+          filteredNodes: filteredGraphNodes,
           containers,
           nodeToContainer,
           intraContainer,
@@ -635,21 +645,215 @@ function useLayerDetailTopology(): LayerDetailTopology {
     };
   }, [built]);
 
+  // ── Stage 2: lazy per-container layout on expand ───────────────────────
+  // Watches expandedContainers and computes ELK on each newly-expanded
+  // container's children (without a cache entry). Critically does NOT
+  // depend on `built` — expanding a container must not trigger Stage 1
+  // relayout of the surrounding atoms.
+  const expandedContainers = useDashboardStore((s) => s.expandedContainers);
+  const containerLayoutCache = useDashboardStore((s) => s.containerLayoutCache);
+  const setContainerLayout = useDashboardStore((s) => s.setContainerLayout);
+
+  const stage2Containers = topology.containers;
+  const stage2Intra = topology.intraContainer;
+
+  useEffect(() => {
+    if (stage2Containers.length === 0) return;
+    const toCompute = [...expandedContainers].filter(
+      (id) => !containerLayoutCache.has(id),
+    );
+    if (toCompute.length === 0) return;
+
+    let cancelled = false;
+    Promise.all(
+      toCompute.map(async (containerId) => {
+        const c = stage2Containers.find((cc) => cc.id === containerId);
+        if (!c) return null;
+        const childIds = new Set(c.nodeIds);
+        const childEdges = stage2Intra.filter(
+          (e) => childIds.has(e.source) && childIds.has(e.target),
+        );
+        const stage2Children: ElkChild[] = c.nodeIds.map((id) => ({
+          id,
+          width: NODE_WIDTH,
+          height: NODE_HEIGHT,
+        }));
+        const stage2Edges: ElkEdge[] = childEdges.map((e, i) => ({
+          id: `${containerId}-e${i}`,
+          sources: [e.source],
+          targets: [e.target],
+        }));
+        const stage2Input: ElkInput = {
+          id: containerId,
+          layoutOptions: ELK_DEFAULT_LAYOUT_OPTIONS,
+          children: stage2Children,
+          edges: stage2Edges,
+        };
+        try {
+          const { positioned, issues } = await applyElkLayout(stage2Input, {
+            strict: import.meta.env.DEV,
+          });
+          if (issues.length > 0) {
+            console.warn(`[Stage 2 ${containerId}] issues:`, issues);
+          }
+          const childPositions = new Map<string, { x: number; y: number }>();
+          let maxX = 0;
+          let maxY = 0;
+          for (const ch of positioned.children ?? []) {
+            const x = ch.x ?? 0;
+            const y = ch.y ?? 0;
+            const w = ch.width ?? NODE_WIDTH;
+            const h = ch.height ?? NODE_HEIGHT;
+            childPositions.set(ch.id, { x, y });
+            if (x + w > maxX) maxX = x + w;
+            if (y + h > maxY) maxY = y + h;
+          }
+          // Pad for container chrome (header + border)
+          const actualSize = { width: maxX + 40, height: maxY + 60 };
+          return { containerId, childPositions, actualSize };
+        } catch (err) {
+          console.error(`[Stage 2 ${containerId}] layout failed:`, err);
+          return null;
+        }
+      }),
+    ).then((results) => {
+      if (cancelled) return;
+      for (const r of results) {
+        if (!r) continue;
+        setContainerLayout(r.containerId, r.childPositions, r.actualSize);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    expandedContainers,
+    stage2Containers,
+    stage2Intra,
+    containerLayoutCache,
+    setContainerLayout,
+  ]);
+
   return topology;
+}
+
+/**
+ * Build a CustomFlowNode from a GraphNode. Mirrors the shape produced by
+ * the inline ungroupedFlowNodes builder in useLayerDetailTopology — kept
+ * symmetric so Stage 2 lazy-expanded children look the same as ungrouped
+ * file nodes.
+ */
+function buildCustomFlowNode(
+  node: GraphNode,
+  opts: {
+    diffMode: boolean;
+    changedNodeIds: Set<string>;
+    affectedNodeIds: Set<string>;
+    onNodeClick: (nodeId: string) => void;
+  },
+): CustomFlowNode {
+  return {
+    id: node.id,
+    type: "custom" as const,
+    position: { x: 0, y: 0 },
+    data: {
+      label: node.name ?? node.filePath?.split("/").pop() ?? node.id,
+      nodeType: node.type,
+      summary: node.summary,
+      complexity: node.complexity,
+      isHighlighted: false,
+      searchScore: undefined,
+      isSelected: false,
+      isTourHighlighted: false,
+      isDiffChanged: opts.diffMode && opts.changedNodeIds.has(node.id),
+      isDiffAffected: opts.diffMode && opts.affectedNodeIds.has(node.id),
+      isDiffFaded:
+        opts.diffMode &&
+        !opts.changedNodeIds.has(node.id) &&
+        !opts.affectedNodeIds.has(node.id),
+      isNeighbor: false,
+      isSelectionFaded: false,
+      onNodeClick: opts.onNodeClick,
+    },
+  };
 }
 
 /**
  * Visual overlay: cheap O(n) pass that applies selection, search, and tour
  * state onto already-positioned nodes. Avoids triggering dagre relayout.
+ *
+ * Also folds in Stage 2 outputs:
+ *   - Expanded children are emitted as React Flow children (`parentId` +
+ *     `extent: "parent"`) using cached positions from `containerLayoutCache`.
+ *   - Aggregated edges incident to an expanded container are replaced with
+ *     the underlying file→file edges from `topo.filteredEdges`.
  */
 function useLayerDetailGraph() {
   const selectedNodeId = useDashboardStore((s) => s.selectedNodeId);
   const searchResults = useDashboardStore((s) => s.searchResults);
   const tourHighlightedNodeIds = useDashboardStore((s) => s.tourHighlightedNodeIds);
+  const expandedContainers = useDashboardStore((s) => s.expandedContainers);
+  const containerLayoutCache = useDashboardStore((s) => s.containerLayoutCache);
+  const diffMode = useDashboardStore((s) => s.diffMode);
+  const changedNodeIds = useDashboardStore((s) => s.changedNodeIds);
+  const affectedNodeIds = useDashboardStore((s) => s.affectedNodeIds);
+  const selectNode = useDashboardStore((s) => s.selectNode);
+
+  const handleNodeSelect = useCallback(
+    (nodeId: string) => selectNode(nodeId),
+    [selectNode],
+  );
 
   const topo = useLayerDetailTopology();
 
+  // Build expanded child nodes from the layout cache for any expanded
+  // container whose layout has been computed. Collapsed containers
+  // contribute zero children (gating on `expandedContainers`).
+  const expandedChildNodes = useMemo<Node[]>(() => {
+    if (expandedContainers.size === 0) return [];
+    const out: Node[] = [];
+    const nodeById = new Map(topo.filteredNodes.map((n) => [n.id, n]));
+    for (const containerId of expandedContainers) {
+      const cache = containerLayoutCache.get(containerId);
+      const container = topo.containers.find((c) => c.id === containerId);
+      if (!cache || !container) continue;
+      for (const childId of container.nodeIds) {
+        const node = nodeById.get(childId);
+        const pos = cache.childPositions.get(childId);
+        if (!node || !pos) continue;
+        const base = buildCustomFlowNode(node, {
+          diffMode,
+          changedNodeIds,
+          affectedNodeIds,
+          onNodeClick: handleNodeSelect,
+        });
+        out.push({
+          ...base,
+          parentId: containerId,
+          extent: "parent",
+          position: pos,
+        } as Node);
+      }
+    }
+    return out;
+  }, [
+    expandedContainers,
+    containerLayoutCache,
+    topo.containers,
+    topo.filteredNodes,
+    diffMode,
+    changedNodeIds,
+    affectedNodeIds,
+    handleNodeSelect,
+  ]);
+
+  // Combine Stage 1 nodes with Stage 2 expanded children, then apply the
+  // visual overlay (selection, search, tour) to every CustomFlowNode in
+  // the combined set.
   const nodes = useMemo(() => {
+    const combined: Node[] = [...topo.nodes, ...expandedChildNodes];
+
     const searchMap = new Map(searchResults.map((r) => [r.nodeId, r.score]));
     const tourSet = new Set(tourHighlightedNodeIds);
 
@@ -663,7 +867,7 @@ function useLayerDetailGraph() {
       neighborNodeIds.add(selectedNodeId);
     }
 
-    return topo.nodes.map((node) => {
+    return combined.map((node) => {
       // Skip portal + container nodes — they have no CustomNodeData.
       // (Container visual overlays land in Task 14.)
       if (node.type === "portal" || node.type === "container") return node;
@@ -692,13 +896,52 @@ function useLayerDetailGraph() {
 
       return { ...node, data: { ...data, isHighlighted, searchScore, isSelected, isTourHighlighted, isNeighbor, isSelectionFaded } };
     });
-  }, [topo.nodes, topo.filteredEdges, selectedNodeId, searchResults, tourHighlightedNodeIds]);
+  }, [topo.nodes, expandedChildNodes, topo.filteredEdges, selectedNodeId, searchResults, tourHighlightedNodeIds]);
+
+  // Replace aggregated edges incident to an expanded container with the
+  // underlying file→file edges from filteredEdges. Aggregated edges where
+  // neither endpoint is expanded pass through unchanged.
+  const expandedEdges = useMemo<Edge[]>(() => {
+    if (expandedContainers.size === 0) return topo.edges;
+
+    const out: Edge[] = [];
+    for (const e of topo.edges) {
+      const srcExpanded = expandedContainers.has(String(e.source));
+      const tgtExpanded = expandedContainers.has(String(e.target));
+      if (!srcExpanded && !tgtExpanded) {
+        out.push(e);
+        continue;
+      }
+      // Match by aggregated endpoints. nodeToContainer maps any file id
+      // (grouped or ungrouped) to its atom — the same key used to build
+      // the aggregated edges in Stage 1.
+      const matching = topo.filteredEdges.filter((fe) => {
+        const fsc = topo.nodeToContainer.get(fe.source);
+        const ftc = topo.nodeToContainer.get(fe.target);
+        return fsc === e.source && ftc === e.target;
+      });
+      for (const m of matching) {
+        out.push({
+          id: `inflated-${m.source}-${m.target}-${m.type}`,
+          source: m.source,
+          target: m.target,
+          label: m.type,
+          style: { stroke: "rgba(212,165,116,0.5)", strokeWidth: 1.5 },
+          labelStyle: { fill: "#a39787", fontSize: 10 },
+        });
+      }
+    }
+    return out;
+  }, [topo.edges, topo.filteredEdges, topo.nodeToContainer, expandedContainers]);
 
   const edges = useMemo(() => {
-    if (!selectedNodeId) return topo.edges;
+    // Compose: Stage 1 / inflated edges, plus portal edges (Stage 1 sources
+    // them off container atoms — re-sourcing on expand is deferred).
+    const base = [...expandedEdges, ...topo.portalEdges];
+    if (!selectedNodeId) return base;
 
     // Apply selection-based edge styling on top of topology edges
-    return topo.edges.map((edge) => {
+    return base.map((edge) => {
       const isSelectedEdge = edge.source === selectedNodeId || edge.target === selectedNodeId;
       // Don't restyle diff-impacted or portal edges
       if ((edge.style as Record<string, unknown>)?.strokeDasharray) return edge;
@@ -709,7 +952,7 @@ function useLayerDetailGraph() {
       // Fade unrelated edges
       return { ...edge, animated: false, style: { stroke: "rgba(212,165,116,0.08)", strokeWidth: 1 }, labelStyle: { fill: "rgba(163,151,135,0.2)", fontSize: 10 } };
     });
-  }, [topo.edges, selectedNodeId]);
+  }, [expandedEdges, topo.portalEdges, selectedNodeId]);
 
   return { nodes, edges };
 }
