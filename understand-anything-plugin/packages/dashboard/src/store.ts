@@ -148,6 +148,28 @@ interface DashboardStore {
   setIsKnowledgeGraph: (value: boolean) => void;
   navigateToDomain: (domainId: string) => void;
   clearActiveDomain: () => void;
+
+  // Container expand/collapse + lazy layout caches
+  expandedContainers: Set<string>;
+  toggleContainer: (containerId: string) => void;
+  expandContainer: (containerId: string) => void;
+  collapseAllContainers: () => void;
+
+  containerLayoutCache: Map<
+    string,
+    {
+      childPositions: Map<string, { x: number; y: number }>;
+      actualSize: { width: number; height: number };
+    }
+  >;
+  setContainerLayout: (
+    containerId: string,
+    childPositions: Map<string, { x: number; y: number }>,
+    actualSize: { width: number; height: number },
+  ) => void;
+  clearContainerLayouts: () => void;
+
+  containerSizeMemory: Map<string, { width: number; height: number }>;
 }
 
 function getSortedTour(graph: KnowledgeGraph): TourStep[] {
@@ -232,6 +254,9 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
       nodeHistory: [],
       viewMode: keepDomainView ? "domain" as const : "structural" as const,
       activeDomainId: keepDomainView ? activeDomainId : null,
+      containerLayoutCache: new Map(),
+      expandedContainers: new Set(),
+      containerSizeMemory: new Map(),
     });
   },
 
@@ -521,4 +546,35 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
       focusNodeId: null,
     });
   },
+
+  expandedContainers: new Set<string>(),
+  toggleContainer: (containerId) =>
+    set((state) => {
+      const next = new Set(state.expandedContainers);
+      if (next.has(containerId)) next.delete(containerId);
+      else next.add(containerId);
+      return { expandedContainers: next };
+    }),
+  expandContainer: (containerId) =>
+    set((state) => {
+      if (state.expandedContainers.has(containerId)) return {};
+      const next = new Set(state.expandedContainers);
+      next.add(containerId);
+      return { expandedContainers: next };
+    }),
+  collapseAllContainers: () => set({ expandedContainers: new Set() }),
+
+  containerLayoutCache: new Map(),
+  setContainerLayout: (containerId, childPositions, actualSize) =>
+    set((state) => {
+      const next = new Map(state.containerLayoutCache);
+      next.set(containerId, { childPositions, actualSize });
+      const sizeNext = new Map(state.containerSizeMemory);
+      sizeNext.set(containerId, actualSize);
+      return { containerLayoutCache: next, containerSizeMemory: sizeNext };
+    }),
+  clearContainerLayouts: () =>
+    set({ containerLayoutCache: new Map(), expandedContainers: new Set() }),
+
+  containerSizeMemory: new Map(),
 }));
