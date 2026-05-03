@@ -981,7 +981,14 @@ function useLayerDetailGraph() {
     });
   }, [expandedEdges, topo.portalEdges, selectedNodeId]);
 
-  return { nodes, edges };
+  // Expose container topology so the parent component can wire auto-expand
+  // triggers (focus, tour, zoom) without having to re-derive containers.
+  const containerIds = useMemo(
+    () => topo.containers.map((c) => c.id),
+    [topo.containers],
+  );
+
+  return { nodes, edges, nodeToContainer: topo.nodeToContainer, containerIds };
 }
 
 // ── Main inner component (must be inside ReactFlowProvider) ────────────
@@ -995,18 +1002,26 @@ function GraphViewInner() {
   const focusNodeId = useDashboardStore((s) => s.focusNodeId);
   const setFocusNode = useDashboardStore((s) => s.setFocusNode);
   const setReactFlowInstance = useDashboardStore((s) => s.setReactFlowInstance);
+  const tourHighlightedNodeIds = useDashboardStore((s) => s.tourHighlightedNodeIds);
+  const expandContainer = useDashboardStore((s) => s.expandContainer);
   const { preset } = useTheme();
 
   const overviewGraph = useOverviewGraph();
   const detailGraph = useLayerDetailGraph();
 
-  const { nodes: initialNodes, edges: initialEdges } =
-    navigationLevel === "overview" ? overviewGraph : detailGraph;
+  const {
+    nodes: initialNodes,
+    edges: initialEdges,
+    nodeToContainer,
+    containerIds,
+  } = navigationLevel === "overview"
+    ? { ...overviewGraph, nodeToContainer: undefined, containerIds: undefined }
+    : detailGraph;
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
 
-  const { fitView } = useReactFlow();
+  const { fitView, getViewport } = useReactFlow();
 
   useEffect(() => {
     setNodes(initialNodes);
@@ -1023,6 +1038,60 @@ function GraphViewInner() {
     }, 50);
     return () => clearTimeout(timer);
   }, [navigationLevel, activeLayerId, fitView]);
+
+  // ── Auto-expand triggers (Task 13) ─────────────────────────────────────
+  // Only meaningful in layer-detail; in overview mode there are no
+  // containers so all three effects no-op.
+
+  // Focus: when focusNodeId resolves to a node inside a container, expand it.
+  // Reading expandContainer is stable (Zustand setter); intentionally omitting
+  // expandedContainers from deps so focus changes are the only trigger.
+  useEffect(() => {
+    if (!focusNodeId || !nodeToContainer) return;
+    const cid = nodeToContainer.get(focusNodeId);
+    // Self-maps mean ungrouped nodes have cid === focusNodeId — skip those.
+    if (cid && cid !== focusNodeId) expandContainer(cid);
+  }, [focusNodeId, nodeToContainer, expandContainer]);
+
+  // Tour: expand containers for every tour-highlighted node so the tour
+  // can fitView onto real nodes rather than collapsed atoms.
+  useEffect(() => {
+    if (tourHighlightedNodeIds.length === 0 || !nodeToContainer) return;
+    for (const nid of tourHighlightedNodeIds) {
+      const cid = nodeToContainer.get(nid);
+      if (cid && cid !== nid) expandContainer(cid);
+    }
+  }, [tourHighlightedNodeIds, nodeToContainer, expandContainer]);
+
+  // Zoom: debounced auto-expand when the user has zoomed in past 1.0.
+  // Hysteresis: zoom < 0.6 = no auto-expand AND no auto-collapse (v1, the
+  // user collapses manually). The handler reads expandedContainers via
+  // getState() inside the timeout to avoid re-creating on every expand.
+  const zoomTimeoutRef = useRef<number | null>(null);
+  const onMove = useCallback(() => {
+    if (!containerIds || containerIds.length === 0) return;
+    if (zoomTimeoutRef.current !== null) {
+      window.clearTimeout(zoomTimeoutRef.current);
+    }
+    zoomTimeoutRef.current = window.setTimeout(() => {
+      const vp = getViewport();
+      if (vp.zoom <= 1.0) return;
+      const expanded = useDashboardStore.getState().expandedContainers;
+      for (const cid of containerIds) {
+        if (!expanded.has(cid)) expandContainer(cid);
+      }
+    }, 200);
+  }, [containerIds, getViewport, expandContainer]);
+
+  // Clear any pending zoom timer on unmount or when handler identity changes.
+  useEffect(() => {
+    return () => {
+      if (zoomTimeoutRef.current !== null) {
+        window.clearTimeout(zoomTimeoutRef.current);
+        zoomTimeoutRef.current = null;
+      }
+    };
+  }, [onMove]);
 
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: { id: string }) => {
@@ -1071,6 +1140,7 @@ function GraphViewInner() {
         onEdgesChange={onEdgesChange}
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
+        onMove={navigationLevel === "layer-detail" ? onMove : undefined}
         onInit={setReactFlowInstance}
         nodeTypes={nodeTypes}
         nodesDraggable={false}
