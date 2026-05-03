@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -176,6 +177,11 @@ function readSourceFile(url: URL) {
 }
 
 export default defineConfig({
+  test: {
+    environment: "node",
+    include: ["src/**/__tests__/**/*.test.ts"],
+  },
+
   // FIX 1 — bind only to localhost, not 0.0.0.0
   // This blocks access from any other device on the same LAN / WiFi.
   server: {
@@ -201,6 +207,10 @@ export default defineConfig({
             return "react-vendor";
           }
           if (id.includes("node_modules/@xyflow/")) return "xyflow";
+          // ELK is ~1.6MB raw — split into its own chunk so it doesn't
+          // bloat the main bundle. graphology is similarly large.
+          if (id.includes("node_modules/elkjs/")) return "elk";
+          if (id.includes("node_modules/graphology")) return "graphology";
           if (
             id.includes("node_modules/@dagrejs/") ||
             id.includes("node_modules/d3-force/")

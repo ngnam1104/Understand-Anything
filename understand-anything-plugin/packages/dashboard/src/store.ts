@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { SearchEngine } from "@understand-anything/core/search";
 import type { SearchResult } from "@understand-anything/core/search";
+import type { GraphIssue } from "@understand-anything/core/schema";
 import type {
   KnowledgeGraph,
   TourStep,
@@ -148,6 +149,37 @@ interface DashboardStore {
   setIsKnowledgeGraph: (value: boolean) => void;
   navigateToDomain: (domainId: string) => void;
   clearActiveDomain: () => void;
+
+  // Container expand/collapse + lazy layout caches
+  expandedContainers: Set<string>;
+  toggleContainer: (containerId: string) => void;
+  expandContainer: (containerId: string) => void;
+  collapseAllContainers: () => void;
+
+  containerLayoutCache: Map<
+    string,
+    {
+      childPositions: Map<string, { x: number; y: number }>;
+      actualSize: { width: number; height: number };
+    }
+  >;
+  setContainerLayout: (
+    containerId: string,
+    childPositions: Map<string, { x: number; y: number }>,
+    actualSize: { width: number; height: number },
+  ) => void;
+  clearContainerLayouts: () => void;
+
+  containerSizeMemory: Map<string, { width: number; height: number }>;
+
+  stage1Tick: number;
+  bumpStage1Tick: () => void;
+
+  // Layout-time issues (e.g. ELK input repair). Funneled into the
+  // WarningBanner alongside graph-validation issues.
+  layoutIssues: GraphIssue[];
+  appendLayoutIssues: (issues: GraphIssue[]) => void;
+  clearLayoutIssues: () => void;
 }
 
 function getSortedTour(graph: KnowledgeGraph): TourStep[] {
@@ -212,6 +244,12 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
         ...state.nodeTypeFilters,
         [category]: !state.nodeTypeFilters[category],
       },
+      // Filter changes shift container.nodeIds; cached child positions
+      // may reference filtered-out children. Drop the cache so Stage 2
+      // recomputes against the current set.
+      containerLayoutCache: new Map(),
+      containerSizeMemory: new Map(),
+      expandedContainers: new Set(),
     })),
 
   setGraph: (graph) => {
@@ -232,6 +270,11 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
       nodeHistory: [],
       viewMode: keepDomainView ? "domain" as const : "structural" as const,
       activeDomainId: keepDomainView ? activeDomainId : null,
+      containerLayoutCache: new Map(),
+      expandedContainers: new Set(),
+      containerSizeMemory: new Map(),
+      stage1Tick: 0,
+      layoutIssues: [],
     });
   },
 
@@ -322,6 +365,12 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
       codeViewerOpen: false,
       codeViewerNodeId: null,
       codeViewerExpanded: false,
+      // Container ids derive from folder names and collide across layers
+      // (e.g. `container:auth` exists in many layers). Drop the cache so
+      // we don't render stale positions for the new layer's children.
+      containerLayoutCache: new Map(),
+      containerSizeMemory: new Map(),
+      expandedContainers: new Set(),
     }),
 
   navigateToOverview: () =>
@@ -333,9 +382,22 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
       codeViewerOpen: false,
       codeViewerNodeId: null,
       codeViewerExpanded: false,
+      containerLayoutCache: new Map(),
+      containerSizeMemory: new Map(),
+      expandedContainers: new Set(),
     }),
 
-  setFocusNode: (nodeId) => set({ focusNodeId: nodeId, selectedNodeId: nodeId }),
+  setFocusNode: (nodeId) =>
+    set({
+      focusNodeId: nodeId,
+      selectedNodeId: nodeId,
+      // Focus mode narrows filteredGraphNodes to focus + 1-hop; the
+      // surviving containers have a subset of their original children,
+      // and the cache must not return positions for filtered-out ids.
+      containerLayoutCache: new Map(),
+      containerSizeMemory: new Map(),
+      expandedContainers: new Set(),
+    }),
   setSearchMode: (mode) => set({ searchMode: mode }),
   setSearchQuery: (query) => {
     const engine = get().searchEngine;
@@ -351,7 +413,14 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
     set({ searchQuery: query, searchResults });
   },
 
-  setPersona: (persona) => set({ persona }),
+  setPersona: (persona) =>
+    set({
+      persona,
+      // Persona changes filter node types, which shifts container.nodeIds.
+      containerLayoutCache: new Map(),
+      containerSizeMemory: new Map(),
+      expandedContainers: new Set(),
+    }),
 
   openCodeViewer: (nodeId) =>
     set({ codeViewerOpen: true, codeViewerNodeId: nodeId, codeViewerExpanded: false }),
@@ -521,4 +590,53 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
       focusNodeId: null,
     });
   },
+
+  expandedContainers: new Set<string>(),
+  toggleContainer: (containerId) =>
+    set((state) => {
+      const next = new Set(state.expandedContainers);
+      if (next.has(containerId)) next.delete(containerId);
+      else next.add(containerId);
+      return { expandedContainers: next };
+    }),
+  expandContainer: (containerId) =>
+    set((state) => {
+      if (state.expandedContainers.has(containerId)) return {};
+      const next = new Set(state.expandedContainers);
+      next.add(containerId);
+      return { expandedContainers: next };
+    }),
+  collapseAllContainers: () => set({ expandedContainers: new Set() }),
+
+  containerLayoutCache: new Map(),
+  setContainerLayout: (containerId, childPositions, actualSize) =>
+    set((state) => {
+      const next = new Map(state.containerLayoutCache);
+      next.set(containerId, { childPositions, actualSize });
+      const sizeNext = new Map(state.containerSizeMemory);
+      sizeNext.set(containerId, actualSize);
+      return { containerLayoutCache: next, containerSizeMemory: sizeNext };
+    }),
+  clearContainerLayouts: () =>
+    set({ containerLayoutCache: new Map(), expandedContainers: new Set() }),
+
+  containerSizeMemory: new Map(),
+
+  stage1Tick: 0,
+  bumpStage1Tick: () => set((s) => ({ stage1Tick: s.stage1Tick + 1 })),
+
+  layoutIssues: [],
+  appendLayoutIssues: (issues) =>
+    set((state) => {
+      if (issues.length === 0) return {};
+      // Dedupe by level+message so a re-running effect doesn't repeatedly
+      // pile up identical issues.
+      const seen = new Set(
+        state.layoutIssues.map((i) => `${i.level}|${i.message}`),
+      );
+      const fresh = issues.filter((i) => !seen.has(`${i.level}|${i.message}`));
+      if (fresh.length === 0) return {};
+      return { layoutIssues: [...state.layoutIssues, ...fresh] };
+    }),
+  clearLayoutIssues: () => set({ layoutIssues: [] }),
 }));
