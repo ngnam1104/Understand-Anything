@@ -16,6 +16,8 @@ import ProjectOverview from "./components/ProjectOverview";
 import FileExplorer from "./components/FileExplorer";
 import WarningBanner from "./components/WarningBanner";
 import TokenGate from "./components/TokenGate";
+import MobileLayout from "./components/MobileLayout";
+import { useIsMobile } from "./hooks/useIsMobile";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import type { KeyboardShortcut } from "./hooks/useKeyboardShortcuts";
 import { ThemeProvider } from "./themes/index.ts";
@@ -118,6 +120,7 @@ function Dashboard({ accessToken }: { accessToken: string }) {
   const domainGraph = useDashboardStore((s) => s.domainGraph);
   const setDomainGraph = useDashboardStore((s) => s.setDomainGraph);
   const layoutIssues = useDashboardStore((s) => s.layoutIssues);
+  const isMobile = useIsMobile();
   // Schema issues + ELK layout issues share the WarningBanner — graph-load
   // problems and dashboard rendering problems are equally surfaced.
   const allIssues = useMemo(
@@ -376,17 +379,32 @@ function Dashboard({ accessToken }: { accessToken: string }) {
     </div>
   );
 
+  if (isMobile) {
+    return (
+      <ThemeProvider metaTheme={metaTheme}>
+        <MobileLayout
+          accessToken={accessToken}
+          showKeyboardHelp={showKeyboardHelp}
+          setShowKeyboardHelp={setShowKeyboardHelp}
+          loadError={loadError}
+          allIssues={allIssues}
+          shortcuts={shortcuts}
+        />
+      </ThemeProvider>
+    );
+  }
+
   return (
     <ThemeProvider metaTheme={metaTheme}>
     <div className="h-screen w-screen flex flex-col bg-root text-text-primary noise-overlay">
       {/* Header */}
-      <header className="flex items-center px-5 py-3 bg-surface border-b border-border-subtle shrink-0 gap-4">
+      <header className="flex items-center px-3 sm:px-5 py-3 bg-surface border-b border-border-subtle shrink-0 gap-2 sm:gap-4">
         {/* Left — fixed */}
-        <div className="flex items-center gap-5 shrink-0">
-          <h1 className="font-serif text-lg text-text-primary tracking-wide">
+        <div className="flex items-center gap-3 sm:gap-5 shrink-0 min-w-0">
+          <h1 className="font-serif text-base sm:text-lg text-text-primary tracking-wide truncate max-w-[160px] sm:max-w-[220px] lg:max-w-none">
             {graph?.project.name ?? "Understand Anything"}
           </h1>
-          <div className="w-px h-5 bg-border-subtle" />
+          <div className="w-px h-5 bg-border-subtle hidden sm:block" />
           <PersonaSelector />
           {graph && !isKnowledgeGraph && domainGraph && (
             <>
@@ -463,12 +481,12 @@ function Dashboard({ accessToken }: { accessToken: string }) {
         </div>
 
         {/* Right — fixed actions */}
-        <div className="flex items-center gap-4 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-4 shrink-0">
           <FilterPanel />
           <ExportMenu />
           <button
             onClick={togglePathFinder}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm bg-elevated text-text-secondary hover:text-text-primary transition-colors"
+            className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-sm bg-elevated text-text-secondary hover:text-text-primary transition-colors"
             title="Find path between nodes (P)"
           >
             <svg
@@ -484,7 +502,7 @@ function Dashboard({ accessToken }: { accessToken: string }) {
                 d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
               />
             </svg>
-            Path
+            <span className="hidden md:inline">Path</span>
           </button>
           <ThemePicker />
           <button
@@ -540,8 +558,8 @@ function Dashboard({ accessToken }: { accessToken: string }) {
           </div>
         </div>
 
-        {/* Right sidebar */}
-        <aside className="w-[360px] shrink-0 bg-surface border-l border-border-subtle overflow-auto">
+        {/* Right sidebar — telescopes at narrower widths */}
+        <aside className="w-[260px] md:w-[300px] lg:w-[360px] shrink-0 bg-surface border-l border-border-subtle overflow-auto">
           {sidebarContent}
         </aside>
 

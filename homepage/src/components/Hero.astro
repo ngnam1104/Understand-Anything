@@ -122,12 +122,13 @@ const githubUrl = 'https://github.com/Lum1104/Understand-Anything';
   /* Headline */
   .hero-title {
     font-family: var(--font-heading);
-    font-size: clamp(3.5rem, 9vw, 7rem);
+    font-size: clamp(2.75rem, 9vw, 7rem);
     color: #e8e2d8;
     line-height: 1.05;
     letter-spacing: -0.025em;
     margin-bottom: 2rem;
     white-space: nowrap;
+    max-width: 100%;
   }
 
   .hero-grad {
@@ -141,7 +142,7 @@ const githubUrl = 'https://github.com/Lum1104/Understand-Anything';
 
   /* Tagline */
   .hero-tagline {
-    font-size: clamp(1.1rem, 2vw, 1.4rem);
+    font-size: clamp(1rem, 2vw, 1.4rem);
     color: #8a8578;
     line-height: 1.7;
     max-width: 900px;
@@ -329,15 +330,56 @@ const githubUrl = 'https://github.com/Lum1104/Understand-Anything';
   .anim-6 { animation-delay: 1.15s; }
 
   /* Responsive */
+  @media (max-width: 900px) {
+    .hero-tagline {
+      white-space: normal;
+      max-width: 36ch;
+      margin-left: auto;
+      margin-right: auto;
+    }
+  }
+
   @media (max-width: 768px) {
-    .hero-pillars { gap: 0.5rem; }
+    .hero { padding: 5rem 1.5rem 3rem; min-height: auto; }
+    .hero-content { gap: 0; }
+    .hero-pillars { gap: 0.5rem; margin-bottom: 2.25rem; }
     .pillar { font-size: 0.8rem; }
+    .hero-badge {
+      font-size: 0.72rem;
+      padding: 0.35rem 1rem;
+      margin-bottom: 1.75rem;
+    }
+    .hero-title { margin-bottom: 1.5rem; }
+  }
+
+  @media (max-width: 640px) {
+    .hero-title {
+      white-space: normal;
+      line-height: 1.02;
+      letter-spacing: -0.03em;
+    }
+    /* Stack the two words on dedicated lines for editorial drama */
+    .hero-title > span { display: block; }
   }
 
   @media (max-width: 480px) {
-    .hero-actions { flex-direction: column; gap: 1rem; }
+    .hero { padding: 4rem 1.25rem 2.25rem; }
+    .hero-actions {
+      flex-direction: column;
+      gap: 0.75rem;
+      width: 100%;
+      max-width: 320px;
+    }
+    .hero-cta,
+    .hero-demo {
+      width: 100%;
+      text-align: center;
+      padding: 0.85rem 1.5rem;
+    }
     .hero-pillars { flex-direction: column; gap: 0.4rem; }
     .pillar-dot { display: none; }
+    .hero-subscribe { margin-top: 1.5rem; }
     .hero-subscribe-toggle { font-size: 0.85rem; }
+    .hero-subscribe-frame iframe { height: 130px; }
   }
 </style>

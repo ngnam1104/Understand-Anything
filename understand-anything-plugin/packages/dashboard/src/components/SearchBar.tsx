@@ -84,7 +84,7 @@ export default function SearchBar() {
 
   return (
     <div ref={containerRef} className="relative z-30">
-      <div className="flex items-center gap-2 px-4 py-2 bg-surface border-b border-border-subtle">
+      <div className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-surface border-b border-border-subtle">
         <svg
           className="w-4 h-4 text-text-muted shrink-0"
           fill="none"
@@ -105,7 +105,7 @@ export default function SearchBar() {
           onChange={handleInputChange}
           onFocus={() => setDropdownOpen(true)}
           placeholder="Search nodes by name, summary, or tags..."
-          className="flex-1 bg-elevated text-text-primary text-sm rounded-lg px-3 py-1.5 border border-border-subtle focus:outline-none focus:border-accent/50 placeholder-text-muted"
+          className="flex-1 min-w-0 bg-elevated text-text-primary text-sm rounded-lg px-3 py-1.5 border border-border-subtle focus:outline-none focus:border-accent/50 placeholder-text-muted"
         />
         <div className="flex items-center gap-1 bg-elevated rounded-lg p-0.5 shrink-0">
           <button
@@ -130,7 +130,7 @@ export default function SearchBar() {
           </button>
         </div>
         {searchQuery.trim() && (
-          <span className="text-xs text-text-muted shrink-0">
+          <span className="hidden sm:inline text-xs text-text-muted shrink-0">
             {searchResults.length} result{searchResults.length !== 1 ? "s" : ""}{" "}
             <span className="text-text-muted">({searchMode})</span>
           </span>
