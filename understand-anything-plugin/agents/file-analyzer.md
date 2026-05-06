@@ -213,7 +213,8 @@ Using the script's structural data and file categories, create edges:
 | `implements` | A class implements an interface in the project | `0.9` | `forward` |
 | `exports` | File exports a function or class node you created (only for exported items — use IN ADDITION to `contains`, not instead of it) | `0.8` | `forward` |
 | `depends_on` | File has runtime dependency on another project file (broader than imports -- includes dynamic requires, lazy loads) | `0.6` | `forward` |
-| `tested_by` | Source file is tested by a test file (infer from test file imports and naming conventions) | `0.5` | `forward` |
+
+> **Note:** Do NOT emit `tested_by` edges. They are produced deterministically by the merge script (`merge-batch-graphs.py`) based on path conventions, in canonical `production → test` direction. Any `tested_by` edges you emit will be discarded.
 
 #### Edges for non-code files:
 
