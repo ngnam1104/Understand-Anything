@@ -69,6 +69,24 @@ COMPLEXITY_MAP: dict[str, str] = {
 VALID_COMPLEXITY = {"simple", "moderate", "complex"}
 
 
+# ── tested_by linker configuration ────────────────────────────────────────
+
+# JS/TS family: a `.test.ts` file may be testing a `.ts`, `.tsx`, `.js`, etc.
+# We try each candidate extension in priority order.
+_JS_TS_EXTS: tuple[str, ...] = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue")
+_JS_TS_TEST_EXTS: frozenset[str] = frozenset(_JS_TS_EXTS)
+
+# Test directory names — if any path segment matches one of these, the file
+# is *located in* a test area. By itself this is not enough to classify the
+# file as a test (helpers/fixtures live there too); we still require a test
+# extension on the basename.
+_TEST_DIR_SEGMENTS: frozenset[str] = frozenset({"__tests__", "tests", "test", "spec"})
+
+# Mirrored production roots — when a test sits under `tests/`, it might be
+# mirroring `src/`, `app/`, `lib/`, or the project root.
+_MIRROR_PRODUCTION_ROOTS: tuple[str, ...] = ("src", "app", "lib", "")
+
+
 def _num(v: Any) -> float:
     """Coerce a value to float for safe comparison (handles string weights)."""
     try:
@@ -190,6 +208,314 @@ def normalize_complexity(value: Any) -> tuple[str, str]:
     return "moderate", "unknown"
 
 
+# ── Deterministic tested_by linker ────────────────────────────────────────
+#
+# `tested_by` edges are produced here, not by the LLM. The LLM sees the
+# relationship only when analyzing a *test* file (production files don't
+# import their tests), so its emitted direction is unreliable across
+# batches. We strip every LLM-emitted `tested_by` edge and produce canonical
+# `production → test` edges from path conventions instead.
+
+def _path_segments(path: str) -> list[str]:
+    """Split a relative POSIX-style path into segments (ignoring empties)."""
+    return [seg for seg in path.split("/") if seg]
+
+
+def _basename(path: str) -> str:
+    return path.rsplit("/", 1)[-1] if "/" in path else path
+
+
+def _splitext(name: str) -> tuple[str, str]:
+    """Return (stem, ext) for a basename. Single-extension only."""
+    if "." not in name:
+        return name, ""
+    stem, _, ext = name.rpartition(".")
+    return stem, "." + ext
+
+
+def is_test_path(path: str) -> bool:
+    """Return True if `path` looks like a test file by basename convention.
+
+    Files inside `tests/`, `__tests__/`, `test/`, or `spec/` directories that
+    do NOT carry a recognized test extension are treated as helpers/fixtures
+    and classified as non-test (so `__tests__/helpers.ts` is not a test).
+    """
+    name = _basename(path)
+    stem, ext = _splitext(name)
+
+    # JS/TS family: *.test.<ext> or *.spec.<ext>
+    if ext in _JS_TS_TEST_EXTS:
+        # stem may itself end with .test or .spec
+        for infix in (".test", ".spec"):
+            if stem.endswith(infix):
+                return True
+
+    # Go: *_test.go
+    if ext == ".go" and stem.endswith("_test"):
+        return True
+
+    # Python: test_*.py or *_test.py
+    if ext == ".py" and (stem.startswith("test_") or stem.endswith("_test")):
+        return True
+
+    # Java: *Test.java, *Tests.java, *IT.java
+    if ext == ".java" and (
+        stem.endswith("Test") or stem.endswith("Tests") or stem.endswith("IT")
+    ):
+        return True
+
+    # Kotlin: *Test.kt, *Tests.kt
+    if ext == ".kt" and (stem.endswith("Test") or stem.endswith("Tests")):
+        return True
+
+    # C#: *Test.cs, *Tests.cs
+    if ext == ".cs" and (stem.endswith("Test") or stem.endswith("Tests")):
+        return True
+
+    # C/C++: *_test.{c,cpp,cc} or test_*.{c,cpp,cc}
+    if ext in {".c", ".cpp", ".cc"} and (
+        stem.startswith("test_") or stem.endswith("_test")
+    ):
+        return True
+
+    return False
+
+
+def _strip_test_infix(stem: str) -> str | None:
+    """For a JS/TS-family stem like `foo.test` or `foo.spec`, strip the
+    trailing `.test` / `.spec`. Returns None if no infix is present."""
+    for infix in (".test", ".spec"):
+        if stem.endswith(infix):
+            return stem[: -len(infix)]
+    return None
+
+
+def _js_ts_sibling_candidates(dir_path: str, base_stem: str) -> list[str]:
+    """Build sibling candidates for a JS/TS family base stem.
+
+    `dir_path` is the parent dir (no trailing slash, may be empty).
+    `base_stem` is the stem with the test infix already stripped.
+    """
+    prefix = f"{dir_path}/" if dir_path else ""
+    return [f"{prefix}{base_stem}{e}" for e in _JS_TS_EXTS]
+
+
+def production_candidates(test_path: str) -> list[str]:
+    """For a test file path, return ordered candidate production paths.
+
+    The returned list is in priority order (sibling first, then `__tests__`
+    walk-out, then mirrored-tree variants). Duplicates are removed while
+    preserving order. Caller should pick the first candidate that resolves
+    to a known production node.
+    """
+    name = _basename(test_path)
+    stem, ext = _splitext(name)
+    segs = _path_segments(test_path)
+    dir_segs = segs[:-1]
+    dir_path = "/".join(dir_segs)
+
+    candidates: list[str] = []
+
+    def add(path: str) -> None:
+        if path and path not in candidates:
+            candidates.append(path)
+
+    # ── JS/TS family ──────────────────────────────────────────────────
+    if ext in _JS_TS_TEST_EXTS:
+        base_stem = _strip_test_infix(stem)
+        if base_stem is not None:
+            # 1. Sibling de-infix: prefer the same extension as the test, then
+            # the rest of the family.
+            sibling_dir = dir_path
+            same_ext = f"{(sibling_dir + '/') if sibling_dir else ''}{base_stem}{ext}"
+            add(same_ext)
+            for c in _js_ts_sibling_candidates(sibling_dir, base_stem):
+                add(c)
+
+            # 2. Walk out of __tests__/ — drop the trailing __tests__ segment.
+            if dir_segs and dir_segs[-1] == "__tests__":
+                parent_dir = "/".join(dir_segs[:-1])
+                add(f"{(parent_dir + '/') if parent_dir else ''}{base_stem}{ext}")
+                for c in _js_ts_sibling_candidates(parent_dir, base_stem):
+                    add(c)
+
+            # 3. Mirrored tree: tests/foo/X.test.ts → src/foo/X.ts (and
+            # variants for app/lib/<root>).
+            if dir_segs and dir_segs[0] in ("tests", "test", "__tests__"):
+                tail = dir_segs[1:]
+                tail_path = "/".join(tail)
+                for root in _MIRROR_PRODUCTION_ROOTS:
+                    parts = [p for p in (root, tail_path) if p]
+                    new_dir = "/".join(parts)
+                    add(f"{(new_dir + '/') if new_dir else ''}{base_stem}{ext}")
+                    for c in _js_ts_sibling_candidates(new_dir, base_stem):
+                        add(c)
+
+    # ── Go ────────────────────────────────────────────────────────────
+    elif ext == ".go" and stem.endswith("_test"):
+        base_stem = stem[: -len("_test")]
+        add(f"{(dir_path + '/') if dir_path else ''}{base_stem}.go")
+
+    # ── Python ────────────────────────────────────────────────────────
+    elif ext == ".py" and (stem.startswith("test_") or stem.endswith("_test")):
+        if stem.startswith("test_"):
+            base_stem = stem[len("test_"):]
+        else:
+            base_stem = stem[: -len("_test")]
+
+        # Sibling
+        add(f"{(dir_path + '/') if dir_path else ''}{base_stem}.py")
+
+        # Mirrored: tests/foo/test_bar.py → src/foo/bar.py (and variants)
+        if dir_segs and dir_segs[0] in ("tests", "test"):
+            tail = dir_segs[1:]
+            tail_path = "/".join(tail)
+            for root in _MIRROR_PRODUCTION_ROOTS:
+                parts = [p for p in (root, tail_path) if p]
+                new_dir = "/".join(parts)
+                add(f"{(new_dir + '/') if new_dir else ''}{base_stem}.py")
+
+    # ── Java ──────────────────────────────────────────────────────────
+    elif ext == ".java":
+        for suffix in ("Tests", "Test", "IT"):
+            if stem.endswith(suffix):
+                base_stem = stem[: -len(suffix)]
+                # Maven/Gradle layout: swap src/test/java/... → src/main/java/...
+                if (
+                    len(dir_segs) >= 3
+                    and dir_segs[0] == "src"
+                    and dir_segs[1] == "test"
+                    and dir_segs[2] == "java"
+                ):
+                    new_segs = ["src", "main", "java"] + list(dir_segs[3:])
+                    new_dir = "/".join(new_segs)
+                    add(f"{new_dir}/{base_stem}.java")
+                # Sibling fallback
+                add(f"{(dir_path + '/') if dir_path else ''}{base_stem}.java")
+                break
+
+    # ── Kotlin ────────────────────────────────────────────────────────
+    elif ext == ".kt":
+        for suffix in ("Tests", "Test"):
+            if stem.endswith(suffix):
+                base_stem = stem[: -len(suffix)]
+                if (
+                    len(dir_segs) >= 3
+                    and dir_segs[0] == "src"
+                    and dir_segs[1] == "test"
+                    and dir_segs[2] == "kotlin"
+                ):
+                    new_segs = ["src", "main", "kotlin"] + list(dir_segs[3:])
+                    new_dir = "/".join(new_segs)
+                    add(f"{new_dir}/{base_stem}.kt")
+                add(f"{(dir_path + '/') if dir_path else ''}{base_stem}.kt")
+                break
+
+    # ── C# ────────────────────────────────────────────────────────────
+    elif ext == ".cs":
+        for suffix in ("Tests", "Test"):
+            if stem.endswith(suffix):
+                base_stem = stem[: -len(suffix)]
+                add(f"{(dir_path + '/') if dir_path else ''}{base_stem}.cs")
+                break
+
+    # ── C/C++ ─────────────────────────────────────────────────────────
+    elif ext in {".c", ".cpp", ".cc"}:
+        if stem.startswith("test_"):
+            base_stem = stem[len("test_"):]
+        elif stem.endswith("_test"):
+            base_stem = stem[: -len("_test")]
+        else:
+            base_stem = None
+        if base_stem is not None:
+            add(f"{(dir_path + '/') if dir_path else ''}{base_stem}{ext}")
+
+    return candidates
+
+
+def _file_node_path(node: dict[str, Any]) -> str | None:
+    """Return the relative project path for a `file:`-prefixed node, else None."""
+    nid = node.get("id", "")
+    if not isinstance(nid, str) or not nid.startswith("file:"):
+        return None
+    fp = node.get("filePath")
+    if isinstance(fp, str) and fp:
+        return fp
+    return nid[len("file:"):]
+
+
+def link_tests(
+    nodes_by_id: dict[str, dict[str, Any]],
+    edges: list[dict[str, Any]],
+) -> tuple[int, int, int]:
+    """Strip LLM-emitted `tested_by` edges, then link production files to
+    their tests deterministically.
+
+    Mutates `nodes_by_id` (adds "tested" tag) and `edges` (in-place strip
+    + append).
+
+    Returns (added, dropped, tagged):
+      added:   number of deterministic tested_by edges appended
+      dropped: number of pre-existing tested_by edges removed
+      tagged:  number of production nodes newly tagged "tested"
+    """
+    # 1. Strip every existing tested_by edge — the LLM's direction is
+    # unreliable, so we discard and replace.
+    dropped = 0
+    write_idx = 0
+    for edge in edges:
+        if edge.get("type") == "tested_by":
+            dropped += 1
+            continue
+        edges[write_idx] = edge
+        write_idx += 1
+    del edges[write_idx:]
+
+    # 2. Index file nodes by relative path; classify each as test or production.
+    file_paths_to_nodes: dict[str, dict[str, Any]] = {}
+    test_nodes: list[tuple[str, dict[str, Any]]] = []
+    for node in nodes_by_id.values():
+        path = _file_node_path(node)
+        if path is None:
+            continue
+        file_paths_to_nodes[path] = node
+        if is_test_path(path):
+            test_nodes.append((path, node))
+
+    # 3. For each test, walk its candidate production paths and take the
+    # first one that exists AND is itself classified as production.
+    added = 0
+    tagged = 0
+    for test_path, test_node in test_nodes:
+        for cand_path in production_candidates(test_path):
+            prod_node = file_paths_to_nodes.get(cand_path)
+            if prod_node is None:
+                continue
+            if is_test_path(cand_path):
+                # Don't link a test to another test even if naming aligns.
+                continue
+            edges.append({
+                "source": prod_node["id"],
+                "target": test_node["id"],
+                "type": "tested_by",
+                "direction": "forward",
+                "weight": 0.5,
+                "description": "Linked by path convention",
+            })
+            added += 1
+            tags = prod_node.setdefault("tags", [])
+            if not isinstance(tags, list):
+                # Defensive: replace malformed tags with a fresh list.
+                tags = []
+                prod_node["tags"] = tags
+            if "tested" not in tags:
+                tags.append("tested")
+                tagged += 1
+            break  # one production match per test file
+
+    return added, dropped, tagged
+
+
 # ── Main merge + normalize ────────────────────────────────────────────────
 
 def merge_and_normalize(batches: list[dict[str, Any]]) -> tuple[dict[str, Any], list[str]]:
@@ -273,6 +599,15 @@ def merge_and_normalize(batches: list[dict[str, Any]]) -> tuple[dict[str, Any], 
             duplicate_count += 1
         nodes_by_id[nid] = node
 
+    # ── Step 5b: Deterministic tested_by linker ──────────────────────
+    # Strip every LLM-emitted tested_by edge (direction unreliable across
+    # batches) and replace with canonical `production → test` edges derived
+    # from path conventions. Production files that gain a paired test get
+    # the "tested" tag.
+    tested_by_added, tested_by_dropped, tested_by_tagged = link_tests(
+        nodes_by_id, all_edges
+    )
+
     # ── Step 6: Deduplicate edges, drop dangling ─────────────────────
     node_ids = set(nodes_by_id.keys())
     edges_by_key: dict[tuple[str, str, str], dict] = {}
@@ -311,11 +646,21 @@ def merge_and_normalize(batches: list[dict[str, Any]]) -> tuple[dict[str, Any], 
         fixed_lines.append(f"  {edges_rewritten:>4} × edge references rewritten after ID normalization")
     if duplicate_count:
         fixed_lines.append(f"  {duplicate_count:>4} × duplicate node IDs removed (kept last)")
+    if tested_by_dropped:
+        fixed_lines.append(f"  {tested_by_dropped:>4} × LLM-emitted tested_by edges dropped (direction unreliable)")
 
     if fixed_lines:
         report.append("")
-        report.append(f"Fixed ({sum(id_fix_patterns.values()) + sum(complexity_fix_patterns.values()) + edges_rewritten + duplicate_count} corrections):")
+        report.append(f"Fixed ({sum(id_fix_patterns.values()) + sum(complexity_fix_patterns.values()) + edges_rewritten + duplicate_count + tested_by_dropped} corrections):")
         report.extend(fixed_lines)
+
+    # Tested-by linker section — separate from Fixed since these are net-new
+    # additions, not corrections.
+    if tested_by_added or tested_by_tagged:
+        report.append("")
+        report.append("Tested-by linker:")
+        report.append(f"  {tested_by_added:>4} × tested_by edges produced (production → test)")
+        report.append(f"  {tested_by_tagged:>4} × production nodes tagged \"tested\"")
 
     # Could not fix section — unknown patterns (grouped) + individual details
     unfixable_total = (
