@@ -151,9 +151,19 @@ function CustomNodeComponent({
           <span className={`text-[10px] font-semibold uppercase tracking-wider ${textColor}`}>
             {data.nodeType}
           </span>
-          <span className={`text-[9px] font-mono ${complexityColor}`}>
-            {data.complexity}
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span className={`text-[9px] font-mono ${complexityColor}`}>
+              {data.complexity}
+            </span>
+            {data.tags?.includes("tested") && (
+              <span
+                className="inline-block w-1.5 h-1.5 rounded-full bg-node-function shadow-[0_0_4px_rgba(90,158,111,0.6)]"
+                role="img"
+                aria-label="Tested"
+                title="Has tests"
+              />
+            )}
+          </div>
         </div>
 
         <div className="text-sm font-serif text-text-primary truncate" title={data.label}>
