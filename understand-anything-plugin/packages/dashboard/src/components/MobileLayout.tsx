@@ -95,7 +95,7 @@ export default function MobileLayout({
           </svg>
         </button>
 
-        <h1 className="font-serif text-base flex-1 min-w-0 truncate text-center text-text-primary tracking-wide">
+        <h1 className="font-heading text-base flex-1 min-w-0 truncate text-center text-text-primary tracking-wide">
           {graph?.project.name ?? "Understand Anything"}
         </h1>
 
