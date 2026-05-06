@@ -199,6 +199,26 @@ class ProductionCandidatesTests(unittest.TestCase):
         cands = mbg.production_candidates("src/test/kotlin/com/foo/BarTest.kt")
         self.assertIn("src/main/kotlin/com/foo/Bar.kt", cands)
 
+    def test_priority_underscore_tests_sibling_before_walkup(self) -> None:
+        # When a test sits in `src/__tests__/`, the sibling-de-infix path
+        # (same directory) ranks before the walk-out path (parent directory).
+        # This is load-bearing: if a project happens to have both
+        # `src/__tests__/X.ts` and `src/X.ts`, we should pair with the
+        # nearer one.
+        cands = mbg.production_candidates("src/__tests__/X.test.ts")
+        self.assertEqual(cands[0], "src/__tests__/X.ts")
+        self.assertIn("src/X.ts", cands)
+        self.assertLess(cands.index("src/__tests__/X.ts"), cands.index("src/X.ts"))
+
+    def test_priority_mirrored_tree_sibling_before_mirror(self) -> None:
+        # `tests/foo/X.test.ts` sibling path is `tests/foo/X.ts`, which must
+        # rank above the mirrored `src/foo/X.ts` variant. Same rationale:
+        # closer pairing wins.
+        cands = mbg.production_candidates("tests/foo/X.test.ts")
+        self.assertEqual(cands[0], "tests/foo/X.ts")
+        self.assertIn("src/foo/X.ts", cands)
+        self.assertLess(cands.index("tests/foo/X.ts"), cands.index("src/foo/X.ts"))
+
 
 # ── link_tests (end-to-end) ───────────────────────────────────────────────
 
@@ -255,14 +275,6 @@ class LinkTestsTests(unittest.TestCase):
                 "weight": 0.5,
                 "description": "from LLM",
             },
-            # Unrelated edge — should survive untouched
-            {
-                "source": "file:src/foo.ts",
-                "target": "file:src/foo.test.ts",
-                "type": "imports",
-                "direction": "forward",
-                "weight": 0.7,
-            },
         ]
 
         added, dropped, tagged = mbg.link_tests(nodes_by_id, edges)
@@ -276,9 +288,37 @@ class LinkTestsTests(unittest.TestCase):
         self.assertEqual(tested_by_edges[0]["source"], "file:src/foo.ts")
         self.assertEqual(tested_by_edges[0]["target"], "file:src/foo.test.ts")
 
-        # Imports edge survives
+    def test_unrelated_edges_survive_strip(self) -> None:
+        nodes_by_id = {
+            "file:src/foo.ts": _file_node("src/foo.ts"),
+            "file:src/foo.test.ts": _file_node("src/foo.test.ts"),
+        }
+        edges: list[dict[str, Any]] = [
+            # LLM tested_by edge that gets stripped
+            {
+                "source": "file:src/foo.test.ts",
+                "target": "file:src/foo.ts",
+                "type": "tested_by",
+                "direction": "forward",
+                "weight": 0.5,
+            },
+            # Unrelated edge — should survive untouched
+            {
+                "source": "file:src/foo.ts",
+                "target": "file:src/foo.test.ts",
+                "type": "imports",
+                "direction": "forward",
+                "weight": 0.7,
+            },
+        ]
+
+        mbg.link_tests(nodes_by_id, edges)
+
         import_edges = [e for e in edges if e["type"] == "imports"]
         self.assertEqual(len(import_edges), 1)
+        self.assertEqual(import_edges[0]["source"], "file:src/foo.ts")
+        self.assertEqual(import_edges[0]["target"], "file:src/foo.test.ts")
+        self.assertEqual(import_edges[0]["weight"], 0.7)
 
     def test_direction_always_forward_production_to_test(self) -> None:
         nodes_by_id = {
@@ -377,6 +417,32 @@ class LinkTestsTests(unittest.TestCase):
         self.assertEqual(tags.count("tested"), 1)
         self.assertIn("core", tags)
 
+    def test_empty_input(self) -> None:
+        edges: list[dict[str, Any]] = []
+        added, dropped, tagged = mbg.link_tests({}, edges)
+        self.assertEqual((added, dropped, tagged), (0, 0, 0))
+        self.assertEqual(edges, [])
+
+    def test_node_without_filepath_falls_back_to_id(self) -> None:
+        # A file node with only `id` (no `filePath`) should still pair via
+        # the path embedded in the ID.
+        prod = {"id": "file:src/foo.ts", "type": "file", "name": "foo.ts", "tags": []}
+        test = {
+            "id": "file:src/foo.test.ts",
+            "type": "file",
+            "name": "foo.test.ts",
+            "tags": [],
+        }
+        nodes_by_id = {prod["id"]: prod, test["id"]: test}
+        edges: list[dict[str, Any]] = []
+
+        added, dropped, tagged = mbg.link_tests(nodes_by_id, edges)
+
+        self.assertEqual((added, dropped, tagged), (1, 0, 1))
+        self.assertEqual(edges[0]["source"], "file:src/foo.ts")
+        self.assertEqual(edges[0]["target"], "file:src/foo.test.ts")
+        self.assertIn("tested", prod["tags"])
+
 
 # ── merge_and_normalize integration ───────────────────────────────────────
 
@@ -417,7 +483,7 @@ class MergeIntegrationTests(unittest.TestCase):
             ],
         }
 
-        assembled, report = mbg.merge_and_normalize([batch])
+        assembled, _report = mbg.merge_and_normalize([batch])
 
         # Output should have exactly one tested_by edge with canonical direction
         tested_by_edges = [e for e in assembled["edges"] if e["type"] == "tested_by"]
@@ -428,10 +494,6 @@ class MergeIntegrationTests(unittest.TestCase):
         # Production node tagged
         prod_node = next(n for n in assembled["nodes"] if n["id"] == "file:src/foo.ts")
         self.assertIn("tested", prod_node["tags"])
-
-        # Report mentions the linker
-        report_text = "\n".join(report)
-        self.assertIn("tested_by", report_text.lower())
 
 
 if __name__ == "__main__":

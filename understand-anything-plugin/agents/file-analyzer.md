@@ -214,7 +214,7 @@ Using the script's structural data and file categories, create edges:
 | `exports` | File exports a function or class node you created (only for exported items — use IN ADDITION to `contains`, not instead of it) | `0.8` | `forward` |
 | `depends_on` | File has runtime dependency on another project file (broader than imports -- includes dynamic requires, lazy loads) | `0.6` | `forward` |
 
-> **Note:** Do NOT emit `tested_by` edges. They are produced deterministically by the merge script (`merge-batch-graphs.py`) based on path conventions, in canonical `production → test` direction. Any `tested_by` edges you emit will be discarded.
+**Note:** Do NOT emit `tested_by` edges. They are produced deterministically by the merge script (`merge-batch-graphs.py`) based on path conventions, in canonical `production → test` direction. Any `tested_by` edges you emit will be discarded.
 
 #### Edges for non-code files:
 
