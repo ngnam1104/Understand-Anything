@@ -39,7 +39,7 @@ export default function TokenGate({ onTokenValid }: TokenGateProps) {
     <div className="h-screen w-screen flex items-center justify-center bg-root noise-overlay">
       <div className="w-full max-w-md px-8 py-10 bg-surface border border-border-subtle rounded-lg shadow-2xl">
         {/* Heading */}
-        <h1 className="font-serif text-2xl text-text-primary tracking-wide text-center mb-2">
+        <h1 className="font-heading text-2xl text-text-primary tracking-wide text-center mb-2">
           Access Token Required
         </h1>
         <p className="text-text-muted text-sm text-center mb-8">

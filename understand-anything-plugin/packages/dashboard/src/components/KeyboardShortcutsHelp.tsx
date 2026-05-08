@@ -31,7 +31,7 @@ export default function KeyboardShortcutsHelp({
         {/* Header */}
         <div className="sticky top-0 glass-heavy border-b border-border-subtle px-6 py-4 flex items-center justify-between">
           <div>
-            <h2 className="text-xl font-serif text-text-primary">
+            <h2 className="text-xl font-heading text-text-primary">
               Keyboard Shortcuts
             </h2>
             <p className="text-xs text-text-muted mt-1">
