@@ -15,6 +15,7 @@ export type NodeType = "file" | "function" | "class" | "module" | "concept" | "c
 export type Complexity = "simple" | "moderate" | "complex";
 export type EdgeCategory = "structural" | "behavioral" | "data-flow" | "dependencies" | "semantic" | "infrastructure" | "domain" | "knowledge";
 export type ViewMode = "structural" | "domain" | "knowledge";
+export type DetailLevel = "file" | "class";
 
 export interface FilterState {
   nodeTypes: Set<NodeType>;
@@ -145,6 +146,13 @@ interface DashboardStore {
   // Node type category filters
   nodeTypeFilters: Record<NodeCategory, boolean>;
   toggleNodeTypeFilter: (category: NodeCategory) => void;
+
+  // Detail level: "file" shows only file nodes (architecture view),
+  // "class" shows files + class nodes (code structure view) with optional function expansion.
+  detailLevel: DetailLevel;
+  setDetailLevel: (level: DetailLevel) => void;
+  showFunctionsInClassView: boolean;
+  toggleShowFunctionsInClassView: () => void;
 
   setGraph: (graph: KnowledgeGraph) => void;
   selectNode: (nodeId: string | null) => void;
@@ -325,6 +333,27 @@ export const useDashboardStore = create<DashboardStore>()((set, get) => ({
       // Filter changes shift container.nodeIds; cached child positions
       // may reference filtered-out children. Drop the cache so Stage 2
       // recomputes against the current set.
+      containerLayoutCache: new Map(),
+      containerSizeMemory: new Map(),
+      expandedContainers: new Set(),
+      pendingFocusContainer: null,
+    })),
+
+  detailLevel: "file",
+  setDetailLevel: (level) =>
+    set({
+      detailLevel: level,
+      // Detail level changes which nodes are visible; cached positions stale.
+      containerLayoutCache: new Map(),
+      containerSizeMemory: new Map(),
+      expandedContainers: new Set(),
+      pendingFocusContainer: null,
+    }),
+
+  showFunctionsInClassView: false,
+  toggleShowFunctionsInClassView: () =>
+    set((state) => ({
+      showFunctionsInClassView: !state.showFunctionsInClassView,
       containerLayoutCache: new Map(),
       containerSizeMemory: new Map(),
       expandedContainers: new Set(),
