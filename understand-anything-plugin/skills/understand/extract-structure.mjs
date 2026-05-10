@@ -28,13 +28,17 @@ const require = createRequire(resolve(pluginRoot, 'package.json'));
 
 // ---------------------------------------------------------------------------
 // Resolve @understand-anything/core
+//
+// Node ESM dynamic import() requires a file:// URL on Windows; passing a raw
+// absolute path like "C:\..." throws ERR_UNSUPPORTED_ESM_URL_SCHEME because the
+// loader parses "C:" as a URL scheme. Wrap both resolutions in pathToFileURL().
 // ---------------------------------------------------------------------------
 let core;
 try {
-  core = await import(require.resolve('@understand-anything/core'));
+  core = await import(pathToFileURL(require.resolve('@understand-anything/core')).href);
 } catch {
   // Fallback: direct path for installed plugin cache layouts
-  core = await import(resolve(pluginRoot, 'packages/core/dist/index.js'));
+  core = await import(pathToFileURL(resolve(pluginRoot, 'packages/core/dist/index.js')).href);
 }
 
 const { TreeSitterPlugin, PluginRegistry, builtinLanguageConfigs, registerAllParsers } = core;
