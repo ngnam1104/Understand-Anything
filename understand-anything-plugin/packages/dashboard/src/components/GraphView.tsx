@@ -366,6 +366,7 @@ function useLayerDetailTopology(): LayerDetailTopology & {
   layoutStatus: "computing" | "ready";
 } {
   const graph = useDashboardStore((s) => s.graph);
+  const nodesById = useDashboardStore((s) => s.nodesById);
   const activeLayerId = useDashboardStore((s) => s.activeLayerId);
   const selectNode = useDashboardStore((s) => s.selectNode);
   const persona = useDashboardStore((s) => s.persona);
@@ -375,6 +376,8 @@ function useLayerDetailTopology(): LayerDetailTopology & {
   const focusNodeId = useDashboardStore((s) => s.focusNodeId);
   const nodeTypeFilters = useDashboardStore((s) => s.nodeTypeFilters);
   const drillIntoLayer = useDashboardStore((s) => s.drillIntoLayer);
+  const detailLevel = useDashboardStore((s) => s.detailLevel);
+  const showFunctionsInClassView = useDashboardStore((s) => s.showFunctionsInClassView);
 
   const handleNodeSelect = useCallback(
     (nodeId: string) => {
@@ -404,10 +407,20 @@ function useLayerDetailTopology(): LayerDetailTopology & {
 
     // Expand layer membership to include sub-file nodes (function/class)
     // whose parent file is in this layer. Joined via "contains" edges.
+    // File view: file nodes only (architecture-level dependencies).
+    // Class view: file nodes + class nodes, functions only when toggle is on.
     const expandedLayerNodeIds = new Set(layerNodeIds);
-    for (const edge of graph.edges) {
-      if (edge.type === "contains" && layerNodeIds.has(edge.source)) {
-        expandedLayerNodeIds.add(edge.target);
+    if (detailLevel !== "file") {
+      for (const edge of graph.edges) {
+        if (edge.type === "contains" && layerNodeIds.has(edge.source)) {
+          const child = nodesById.get(edge.target);
+          if (!child) continue;
+          if (child.type === "class") {
+            expandedLayerNodeIds.add(edge.target);
+          } else if (child.type === "function" && showFunctionsInClassView) {
+            expandedLayerNodeIds.add(edge.target);
+          }
+        }
       }
     }
 
@@ -626,6 +639,7 @@ function useLayerDetailTopology(): LayerDetailTopology & {
     };
   }, [
     graph,
+    nodesById,
     activeLayerId,
     persona,
     diffMode,
@@ -634,6 +648,8 @@ function useLayerDetailTopology(): LayerDetailTopology & {
     focusNodeId,
     nodeTypeFilters,
     drillIntoLayer,
+    detailLevel,
+    showFunctionsInClassView,
     handleNodeSelect,
     handleContainerToggle,
   ]);

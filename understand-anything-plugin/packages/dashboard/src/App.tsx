@@ -109,6 +109,10 @@ function Dashboard({ accessToken }: { accessToken: string }) {
   const togglePathFinder = useDashboardStore((s) => s.togglePathFinder);
   const nodeTypeFilters = useDashboardStore((s) => s.nodeTypeFilters);
   const toggleNodeTypeFilter = useDashboardStore((s) => s.toggleNodeTypeFilter);
+  const detailLevel = useDashboardStore((s) => s.detailLevel);
+  const setDetailLevel = useDashboardStore((s) => s.setDetailLevel);
+  const showFunctionsInClassView = useDashboardStore((s) => s.showFunctionsInClassView);
+  const toggleShowFunctionsInClassView = useDashboardStore((s) => s.toggleShowFunctionsInClassView);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [graphIssues, setGraphIssues] = useState<GraphIssue[]>([]);
   const [showKeyboardHelp, setShowKeyboardHelp] = useState(false);
@@ -443,6 +447,52 @@ function Dashboard({ accessToken }: { accessToken: string }) {
         <div className="flex-1 min-w-0 overflow-x-auto scrollbar-hide">
           <div className="flex items-center gap-4 w-max">
             <DiffToggle />
+            {/* Detail level: file view (architecture) / class view (code structure) */}
+            {!isKnowledgeGraph && viewMode !== "domain" && (
+              <>
+                <div className="w-px h-5 bg-border-subtle" />
+                <div className="flex items-center bg-elevated rounded-lg p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setDetailLevel("file")}
+                    title="Files only — architecture-level dependencies (fast)"
+                    className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                      detailLevel === "file"
+                        ? "bg-accent/20 text-accent"
+                        : "text-text-muted hover:text-text-secondary"
+                    }`}
+                  >
+                    Files
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDetailLevel("class")}
+                    title="Files + Classes — code structure with inheritance"
+                    className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                      detailLevel === "class"
+                        ? "bg-accent/20 text-accent"
+                        : "text-text-muted hover:text-text-secondary"
+                    }`}
+                  >
+                    +Classes
+                  </button>
+                </div>
+                {detailLevel === "class" && (
+                  <button
+                    type="button"
+                    onClick={toggleShowFunctionsInClassView}
+                    title="Toggle function nodes (may slow down rendering)"
+                    className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-1 rounded border transition-colors ${
+                      showFunctionsInClassView
+                        ? "border-amber-500/50 bg-amber-500/10 text-amber-400"
+                        : "border-border-medium bg-elevated text-text-muted hover:text-text-secondary"
+                    }`}
+                  >
+                    fn
+                  </button>
+                )}
+              </>
+            )}
             <div className="flex items-center gap-1">
               {(isKnowledgeGraph ? [
                 { key: "knowledge" as const, label: "All", color: "var(--color-node-article)" },
